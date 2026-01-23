@@ -41,7 +41,7 @@ const {
 const { getStatsMeta } = require('./stats');
 const { buildStatsChannelMessage } = require('./stats_ui');
 const { buildHealthMessage } = require('./health');
-const { getHistoryPage, setGuildSettings, resetGuildMemory, resetGuildHistory, setStatsMessage, getStatsMessage, clearStatsMessage } = require('./memory');
+const { getHistoryPage, setGuildSettings, resetGuildMemory, resetGuildHistory, resetGuildMessages, setStatsMessage, getStatsMessage, clearStatsMessage } = require('./memory');
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 
 const BUTTON_COOLDOWN_MS = 5000;
@@ -343,6 +343,19 @@ async function handleInteraction(interaction) {
       if (commandName === 'stats') {
         const payload = buildStatsChannelMessage(guildId);
         const { messageId, channelId } = getStatsMessage(guildId);
+        // Fallback cleanup: remove recent bot stats cards in this channel
+        if (interaction.channel?.messages) {
+          const recent = await interaction.channel.messages.fetch({ limit: 20 }).catch(() => null);
+          if (recent) {
+            const toDelete = recent.filter(m =>
+              m.author?.id === interaction.client.user.id
+              && m.embeds?.[0]?.title?.includes('DJ DIKKAT Stats')
+            );
+            for (const msg of toDelete.values()) {
+              await msg.delete().catch(() => {});
+            }
+          }
+        }
         if (messageId && channelId) {
           const channel = interaction.channelId === channelId
             ? interaction.channel
@@ -429,6 +442,8 @@ async function handleInteraction(interaction) {
         }
         if (scope === 'history') {
           resetGuildHistory(guildId);
+        } else if (scope === 'messages') {
+          resetGuildMessages(guildId);
         } else {
           resetGuildMemory(guildId);
         }

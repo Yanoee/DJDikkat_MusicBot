@@ -9,7 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const STATS_PATH = path.join(__dirname, 'data/stats.json');
+const DATA_DIR = path.join(__dirname, 'data');
+const STATS_PATH = path.join(DATA_DIR, 'stats.json');
 const MAX_DAYS = 30;
 let tracksSinceBoot = 0;
 let lastWriteTime = null;

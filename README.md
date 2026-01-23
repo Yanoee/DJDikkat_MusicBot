@@ -75,6 +75,7 @@ This project is shared freely.
 Please use it responsibly and do not misuse its name or intent.
 
 ### Author
-- [@octokatherine](https://www.github.com/octokatherine)
+- [@octokatherine](https://www.github.com/Yanoee)
+
 
 

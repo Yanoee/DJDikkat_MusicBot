@@ -1,4 +1,10 @@
-﻿# 🎧 DJDikkat Discord Music Bot
+﻿![Node.js](https://img.shields.io/badge/Node.js-20-green?logo=node.js)
+![Discord.js](https://img.shields.io/badge/discord.js-v14-blue?logo=discord)
+![Lavalink](https://img.shields.io/badge/Lavalink-Audio-purple)
+![Shoukaku](https://img.shields.io/badge/Shoukaku-v4-orange)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
+# 🎧 DJDikkat Discord Music Bot
 
 DJDikkat is a **private Discord music bot** built for a personal server.  
 It is completely **free**, non-commercial, and made mainly for fun, jokes, and good memories.

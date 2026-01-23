@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 2.0.3.17
+ * Build 2.0.4.0
  * Author: Yanoee
  ************************************************************/
 require('dotenv').config();
@@ -10,6 +10,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Events, ActivityType } = require('discord.js');
 const { Shoukaku, Connectors } = require('shoukaku');
 const pkg = require('../package.json');
+const logger = require('./logs/logger');
 
 const { handleInteraction, deployCommands } = require('./commands');
 const { getState } = require('./state');
@@ -31,11 +32,32 @@ const shoukaku = new Shoukaku(
   [{
     name: 'main',
     url: `${process.env.LAVALINK_HOST}:${process.env.LAVALINK_PORT}`,
-    auth: process.env.LAVALINK_PASSWORD
+    auth: process.env.LAVALINK_PASSWORD,
+    secure: process.env.LAVALINK_SECURE === 'true'
   }]
 );
 
 client.shoukaku = shoukaku;
+
+shoukaku.on('error', (nodeName, error) => {
+  logger.error(`[LAVALINK ERROR] Node ${nodeName}`, error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled rejection', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', err);
+});
+
+client.on('error', (err) => {
+  logger.error('Discord client error', err);
+});
+
+client.on('warn', (info) => {
+  logger.warn('Discord client warn', { info });
+});
 
 // Forward raw voice packets (REQUIRED)
 client.on('raw', (p) => {
@@ -46,8 +68,8 @@ client.on('raw', (p) => {
 // ---------------- READY ----------------
 
 client.once(Events.ClientReady, async () => {
-  console.log(`🚀 Starting Dj Dikkat`);
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  logger.info('🚀 Starting Dj Dikkat');
+  logger.info(`✅ Logged in as ${client.user.tag}`);
   await deployCommands(client);
   if (client.user) {
     client.user.setPresence({

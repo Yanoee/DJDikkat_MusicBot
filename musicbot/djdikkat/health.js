@@ -140,6 +140,12 @@ function buildHealthMessage(client, state, meta, node, userId, guildId) {
       .setLabel('Reset History')
       .setEmoji('🧹')
       .setStyle(ButtonStyle.Danger)
+    ,
+    new ButtonBuilder()
+      .setCustomId(`memreset:messages:${guildId}:${userId}`)
+      .setLabel('Reset Messages')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger)
   );
   return { embeds: [embed], components: [row] };
 }

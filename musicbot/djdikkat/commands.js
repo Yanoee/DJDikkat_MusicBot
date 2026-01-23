@@ -22,7 +22,8 @@ const {
 } = require('./state');
 
 const {
-  upsertController
+  upsertController,
+  repostController
 } = require('./ui');
 
 const {
@@ -246,7 +247,7 @@ async function handleInteraction(interaction) {
           state.queue.push(t);
         });
 
-        await upsertController(guildId, state);
+        await repostController(guildId, state);
 
         await interaction.followUp(
           `✅ Added **${tracks.length}** track(s)`
@@ -342,9 +343,18 @@ async function handleInteraction(interaction) {
       if (commandName === 'stats') {
         const { messageId, channelId } = getStatsMessage(guildId);
         if (messageId && channelId) {
-          const channel = await interaction.client.channels.fetch(channelId).catch(() => null);
-          if (channel && channel.messages) {
-            await channel.messages.delete(messageId).catch(() => {});
+          const channel = interaction.channelId === channelId
+            ? interaction.channel
+            : await interaction.client.channels.fetch(channelId).catch(() => null);
+          if (channel?.messages) {
+            const oldMsg = await channel.messages.fetch(messageId).catch(() => null);
+            if (oldMsg) {
+              await oldMsg.delete().catch(() => {});
+            } else {
+              clearStatsMessage(guildId);
+            }
+          } else {
+            clearStatsMessage(guildId);
           }
         }
 

@@ -1,4 +1,8 @@
-﻿![Node.js](https://img.shields.io/badge/Node.js-20-green?logo=node.js)
+<p align="center">
+  <img src="https://images2.imgbox.com/6c/31/E8jm3ZKg_o.png" alt="DJDikkat Logo" width="180">
+</p>
+
+![Node.js](https://img.shields.io/badge/Node.js-20-green?logo=node.js)
 ![Discord.js](https://img.shields.io/badge/discord.js-v14-blue?logo=discord)
 ![Lavalink](https://img.shields.io/badge/Lavalink-Audio-purple)
 ![Shoukaku](https://img.shields.io/badge/Shoukaku-v4-orange)
@@ -68,4 +72,5 @@ It is not official, not affiliated, and not monetized, just a small personal tri
 
 This project is shared freely.  
 Please use it responsibly and do not misuse its name or intent.
+
 

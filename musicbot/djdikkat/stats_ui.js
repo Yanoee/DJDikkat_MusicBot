@@ -9,7 +9,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getStatsSnapshot, topFromMap, topFromUrlMap, topUsers } = require('./stats');
 
-const TITLE_LIMIT = 40;
+const TITLE_LIMIT = 60;
 
 function medal(i) {
   if (i === 0) return '🥇';
@@ -116,7 +116,8 @@ function buildStatsEmbed() {
 
 module.exports = {
   buildStatsEmbed,
-  buildStatsMessage
+  buildStatsMessage,
+  buildStatsChannelMessage
 };
 
 function buildStatsMessage(userId) {
@@ -124,6 +125,18 @@ function buildStatsMessage(userId) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`dmremove:stats:${userId}`)
+      .setLabel('Remove')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Secondary)
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+function buildStatsChannelMessage(guildId) {
+  const embed = buildStatsEmbed();
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`statsremove:${guildId}`)
       .setLabel('Remove')
       .setEmoji('🗑️')
       .setStyle(ButtonStyle.Secondary)

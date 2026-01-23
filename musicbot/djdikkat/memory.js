@@ -9,7 +9,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const MEMORY_PATH = path.join(__dirname, 'data/memory.json');
+const DATA_DIR = path.join(__dirname, 'data');
+const MEMORY_PATH = path.join(DATA_DIR, 'memory.json');
 const HISTORY_MAX = 200;
 const RECENT_MAX = 10;
 
@@ -33,6 +34,7 @@ function loadMemory() {
 
 function saveMemory(mem) {
   try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(MEMORY_PATH, JSON.stringify(mem, null, 2), 'utf8');
   } catch {}
 }
@@ -107,6 +109,14 @@ function getGuildMemory(guildId) {
   return guild;
 }
 
+function getAllGuildSettings() {
+  const mem = loadMemory();
+  return Object.entries(mem.guilds || {}).map(([guildId, data]) => ({
+    guildId,
+    settings: data?.settings || {}
+  }));
+}
+
 function getHistoryPage(guildId, page, pageSize) {
   const guild = getGuildMemory(guildId);
   const total = guild.history.length;
@@ -133,6 +143,26 @@ function resetGuildHistory(guildId) {
   saveMemory(mem);
 }
 
+function setUiMessage(guildId, channelId, messageId) {
+  if (!guildId) return;
+  const mem = loadMemory();
+  const guild = ensureGuild(mem, guildId);
+  guild.settings = { ...guild.settings, uiMessageId: messageId || null, uiChannelId: channelId || null };
+  saveMemory(mem);
+}
+
+function getUiMessage(guildId) {
+  const guild = getGuildMemory(guildId);
+  return {
+    messageId: guild.settings.uiMessageId || null,
+    channelId: guild.settings.uiChannelId || null
+  };
+}
+
+function clearUiMessage(guildId) {
+  setUiMessage(guildId, null, null);
+}
+
 function setStatsMessage(guildId, channelId, messageId) {
   if (!guildId) return;
   const mem = loadMemory();
@@ -157,10 +187,14 @@ module.exports = {
   recordHistory,
   setGuildSettings,
   getGuildMemory,
+  getAllGuildSettings,
   getHistoryPage,
   resetGuildMemory,
   resetGuildHistory,
   setStatsMessage,
   getStatsMessage,
-  clearStatsMessage
+  clearStatsMessage,
+  setUiMessage,
+  getUiMessage,
+  clearUiMessage
 };

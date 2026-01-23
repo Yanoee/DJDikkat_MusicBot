@@ -16,7 +16,7 @@ const {
   upsertController,
   removeController
 } = require('./ui');
-const { recordHistory } = require('./memory');
+const { recordHistory, getStatsMessage, clearStatsMessage } = require('./memory');
 const { recordPlay } = require('./stats');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
@@ -229,6 +229,16 @@ async function disconnectGuild(guildId) {
 
   clearInactivity(state);
   state.disconnecting = true;
+
+  const { messageId, channelId } = getStatsMessage(guildId);
+  if (messageId && channelId && state.client) {
+    const channel = await state.client.channels.fetch(channelId).catch(() => null);
+    if (channel?.messages) {
+      const msg = await channel.messages.fetch(messageId).catch(() => null);
+      if (msg) await msg.delete().catch(() => {});
+    }
+    clearStatsMessage(guildId);
+  }
 
   try {
     if (state.player) {

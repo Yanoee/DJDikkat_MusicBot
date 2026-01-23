@@ -5,7 +5,9 @@
  * Build 2.0.4.0
  * Author: Yanoee
  ************************************************************/
-require('dotenv').config();
+const path = require('path');
+// Always load the bot's .env regardless of current working directory.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const { Client, GatewayIntentBits, Events, ActivityType } = require('discord.js');
 const { Shoukaku, Connectors } = require('shoukaku');

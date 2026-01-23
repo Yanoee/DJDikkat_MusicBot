@@ -1,6 +1,6 @@
 ![Logo](https://images2.imgbox.com/6c/31/E8jm3ZKg_o.png)
 
-![License](https://img.shields.io/badge/License-MIT-yellow)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](https://github.com/Yanoee/DjDikkat_MusicBot/blob/main/LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-20-green?logo=node.js)](https://nodejs.org/)
 [![Discord.js](https://img.shields.io/badge/discord.js-v14-blue?logo=discord)](https://discord.js.org/)
 [![Lavalink](https://img.shields.io/badge/Lavalink-Audio-purple)](https://github.com/lavalink-devs/Lavalink)
@@ -76,6 +76,7 @@ Please use it responsibly and do not misuse its name or intent.
 
 ### Author
 - [@Yanoee](https://www.github.com/Yanoee)
+
 
 
 

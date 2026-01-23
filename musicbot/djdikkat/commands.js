@@ -39,7 +39,7 @@ const {
 } = require('./player');
 
 const { getStatsMeta } = require('./stats');
-const { buildStatsEmbed } = require('./stats_ui');
+const { buildStatsChannelMessage } = require('./stats_ui');
 const { buildHealthMessage } = require('./health');
 const { getHistoryPage, setGuildSettings, resetGuildMemory, resetGuildHistory, setStatsMessage, getStatsMessage, clearStatsMessage } = require('./memory');
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
@@ -341,6 +341,7 @@ async function handleInteraction(interaction) {
 
       /* 📊 STATS */
       if (commandName === 'stats') {
+        const payload = buildStatsChannelMessage(guildId);
         const { messageId, channelId } = getStatsMessage(guildId);
         if (messageId && channelId) {
           const channel = interaction.channelId === channelId
@@ -349,7 +350,14 @@ async function handleInteraction(interaction) {
           if (channel?.messages) {
             const oldMsg = await channel.messages.fetch(messageId).catch(() => null);
             if (oldMsg) {
-              await oldMsg.delete().catch(() => {});
+              const deleted = await oldMsg.delete().then(() => true).catch(() => false);
+              if (!deleted) {
+                const edited = await oldMsg.edit(payload).then(() => true).catch(() => false);
+                if (edited) {
+                  setStatsMessage(guildId, channelId, oldMsg.id);
+                  return;
+                }
+              }
             } else {
               clearStatsMessage(guildId);
             }
@@ -358,15 +366,7 @@ async function handleInteraction(interaction) {
           }
         }
 
-        const embed = buildStatsEmbed();
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`statsremove:${guildId}`)
-            .setLabel('Remove')
-            .setEmoji('🗑️')
-            .setStyle(ButtonStyle.Secondary)
-        );
-        const msg = await interaction.reply({ embeds: [embed], components: [row] });
+        const msg = await interaction.reply(payload);
         const message = msg?.id ? msg : await interaction.fetchReply();
         setStatsMessage(guildId, interaction.channelId, message.id);
         return;

@@ -58,8 +58,6 @@ To run it yourself, you will need:
 - A running Lavalink server
 - A properly configured `.env` file
 
-> ⚠️ Tokens and secrets are **not included** and should never be committed to GitHub.
-
 ---
 
 ## 🖤 Dedication
@@ -76,6 +74,7 @@ Please use it responsibly and do not misuse its name or intent.
 
 ### Author
 - [@Yanoee](https://www.github.com/Yanoee)
+
 
 
 

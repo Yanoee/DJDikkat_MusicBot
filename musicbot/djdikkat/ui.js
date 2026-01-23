@@ -152,9 +152,16 @@ async function upsertController(guildId, state) {
   }
 
   if (controllers.has(guildId)) {
-    await controllers.get(guildId).edit({ embeds: [embed], components });
-  } else {
-    const msg = await channel.send({ embeds: [embed], components });
+    const current = controllers.get(guildId);
+    const edited = await current.edit({ embeds: [embed], components })
+      .then(() => true)
+      .catch(() => false);
+    if (edited) return;
+    controllers.delete(guildId);
+  }
+
+  const msg = await channel.send({ embeds: [embed], components }).catch(() => null);
+  if (msg) {
     controllers.set(guildId, msg);
     setUiMessage(guildId, channel.id, msg.id);
   }

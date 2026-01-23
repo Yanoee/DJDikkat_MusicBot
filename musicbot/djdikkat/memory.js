@@ -1,4 +1,4 @@
-/************************************************************
+﻿/************************************************************
  * DJ DIKKAT - Music Bot
  * Memory store
  * JSON-backed guild cache (history/settings)
@@ -9,12 +9,20 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(__dirname, 'data/');
 const MEMORY_PATH = path.join(DATA_DIR, 'memory.json');
+const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
 const HISTORY_MAX = 200;
 const RECENT_MAX = 10;
 
 function emptyMemory() {
+  return {
+    version: 1,
+    guilds: {}
+  };
+}
+
+function emptyMessages() {
   return {
     version: 1,
     guilds: {}
@@ -32,10 +40,28 @@ function loadMemory() {
   }
 }
 
+function loadMessages() {
+  try {
+    if (!fs.existsSync(MESSAGES_PATH)) return emptyMessages();
+    const raw = fs.readFileSync(MESSAGES_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    return data && data.guilds ? data : emptyMessages();
+  } catch {
+    return emptyMessages();
+  }
+}
+
 function saveMemory(mem) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(MEMORY_PATH, JSON.stringify(mem, null, 2), 'utf8');
+  } catch {}
+}
+
+function saveMessages(mem) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(MESSAGES_PATH, JSON.stringify(mem, null, 2), 'utf8');
   } catch {}
 }
 
@@ -52,6 +78,27 @@ function ensureGuild(mem, guildId) {
       recentSongs: [],
       recentUsers: [],
       history: []
+    };
+  }
+  return mem.guilds[guildId];
+}
+
+function ensureGuildMessages(mem, guildId) {
+  if (!mem.guilds[guildId]) {
+    mem.guilds[guildId] = {
+      messages: {
+        uiMessageId: null,
+        uiChannelId: null,
+        statsMessageId: null,
+        statsChannelId: null
+      }
+    };
+  } else if (!mem.guilds[guildId].messages) {
+    mem.guilds[guildId].messages = {
+      uiMessageId: null,
+      uiChannelId: null,
+      statsMessageId: null,
+      statsChannelId: null
     };
   }
   return mem.guilds[guildId];
@@ -145,17 +192,18 @@ function resetGuildHistory(guildId) {
 
 function setUiMessage(guildId, channelId, messageId) {
   if (!guildId) return;
-  const mem = loadMemory();
-  const guild = ensureGuild(mem, guildId);
-  guild.settings = { ...guild.settings, uiMessageId: messageId || null, uiChannelId: channelId || null };
-  saveMemory(mem);
+  const mem = loadMessages();
+  const guild = ensureGuildMessages(mem, guildId);
+  guild.messages = { ...guild.messages, uiMessageId: messageId || null, uiChannelId: channelId || null };
+  saveMessages(mem);
 }
 
 function getUiMessage(guildId) {
-  const guild = getGuildMemory(guildId);
+  const mem = loadMessages();
+  const guild = ensureGuildMessages(mem, guildId);
   return {
-    messageId: guild.settings.uiMessageId || null,
-    channelId: guild.settings.uiChannelId || null
+    messageId: guild.messages.uiMessageId || null,
+    channelId: guild.messages.uiChannelId || null
   };
 }
 
@@ -165,22 +213,31 @@ function clearUiMessage(guildId) {
 
 function setStatsMessage(guildId, channelId, messageId) {
   if (!guildId) return;
-  const mem = loadMemory();
-  const guild = ensureGuild(mem, guildId);
-  guild.settings = { ...guild.settings, statsMessageId: messageId || null, statsChannelId: channelId || null };
-  saveMemory(mem);
+  const mem = loadMessages();
+  const guild = ensureGuildMessages(mem, guildId);
+  guild.messages = { ...guild.messages, statsMessageId: messageId || null, statsChannelId: channelId || null };
+  saveMessages(mem);
 }
 
 function getStatsMessage(guildId) {
-  const guild = getGuildMemory(guildId);
+  const mem = loadMessages();
+  const guild = ensureGuildMessages(mem, guildId);
   return {
-    messageId: guild.settings.statsMessageId || null,
-    channelId: guild.settings.statsChannelId || null
+    messageId: guild.messages.statsMessageId || null,
+    channelId: guild.messages.statsChannelId || null
   };
 }
 
 function clearStatsMessage(guildId) {
   setStatsMessage(guildId, null, null);
+}
+
+function resetGuildMessages(guildId) {
+  if (!guildId) return;
+  const mem = loadMessages();
+  mem.guilds[guildId] = undefined;
+  delete mem.guilds[guildId];
+  saveMessages(mem);
 }
 
 module.exports = {
@@ -191,6 +248,7 @@ module.exports = {
   getHistoryPage,
   resetGuildMemory,
   resetGuildHistory,
+  resetGuildMessages,
   setStatsMessage,
   getStatsMessage,
   clearStatsMessage,

@@ -159,6 +159,28 @@ async function upsertController(guildId, state) {
 }
 
 /**
+ * Recreate controller message (move to bottom)
+ */
+async function repostController(guildId, state) {
+  if (!state.player || !state.textChannelId || !state.client) return;
+
+  const channel = state.client.channels.cache.get(state.textChannelId)
+    || await state.client.channels.fetch(state.textChannelId).catch(() => null);
+  if (!channel || !channel.send) return;
+
+  const embed = buildEmbed(state);
+  const components = [buildButtons(guildId, state.paused)];
+
+  if (controllers.has(guildId)) {
+    await controllers.get(guildId).delete().catch(() => {});
+    controllers.delete(guildId);
+  }
+
+  const msg = await channel.send({ embeds: [embed], components });
+  controllers.set(guildId, msg);
+}
+
+/**
  * Remove controller message
  */
 async function removeController(guildId) {
@@ -169,5 +191,6 @@ async function removeController(guildId) {
 
 module.exports = {
   upsertController,
-  removeController
+  removeController,
+  repostController
 };

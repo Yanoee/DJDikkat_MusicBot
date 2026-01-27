@@ -57,6 +57,7 @@ function loadStats() {
 
 function saveStats(stats) {
   try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(STATS_PATH, JSON.stringify(stats, null, 2), 'utf8');
     lastWriteTime = new Date();
   } catch {}

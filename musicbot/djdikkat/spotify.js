@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Spotify fallback resolver
  * Spotify -> YouTube search queries
- * Build 2.0.1.1
+ * Build 2.0.2
  * Author: Yanoee
  ************************************************************/
 
@@ -19,15 +19,21 @@ let tokenCache = {
 
 function isSpotifyUrl(input) {
   if (!input) return false;
-  return /^https?:\/\/(open|play)\.spotify\.com\//i.test(input);
+  return /^https?:\/\/(open|play)\.spotify\.com\//i.test(input)
+    || /^https?:\/\/spotify\.link\//i.test(input);
 }
 
 function parseSpotifyUrl(url) {
   try {
     const u = new URL(url);
     const parts = u.pathname.split('/').filter(Boolean);
-    const type = parts[0];
-    const id = parts[1];
+    // Handle locale-prefixed paths like /intl-tr/track/{id}
+    let i = 0;
+    if (parts[i] && /^intl-/i.test(parts[i])) i += 1;
+    // Handle embed paths like /embed/track/{id}
+    if (parts[i] === 'embed') i += 1;
+    const type = parts[i];
+    const id = parts[i + 1];
     if (!type || !id) return null;
     if (!['track', 'album', 'playlist'].includes(type)) return null;
     return { type, id };
@@ -43,7 +49,7 @@ async function getToken() {
   }
 
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-    throw new Error("DISCORDUN API'SI AI TARAFINDAN SIKILDIGI ICIN SPOTIFY CALISMICAK BIR SONRA KI EMRE KADAR");
+    throw new Error("Failed to get Spotify API key!");
   }
 
   const body = new URLSearchParams({
@@ -89,7 +95,13 @@ function trackToQuery(track) {
 }
 
 async function resolveSpotifyTracks(url, limit = 3) {
-  const parsed = parseSpotifyUrl(url);
+  let parsed = parseSpotifyUrl(url);
+  if (!parsed && /^https?:\/\/spotify\.link\//i.test(url)) {
+    try {
+      const res = await fetch(url, { redirect: 'follow' });
+      parsed = parseSpotifyUrl(res.url);
+    } catch {}
+  }
   if (!parsed) return [];
 
   if (parsed.type === 'track') {
@@ -98,9 +110,20 @@ async function resolveSpotifyTracks(url, limit = 3) {
   }
 
   if (parsed.type === 'album') {
-    const album = await spotifyGet(`/albums/${parsed.id}`);
-    const tracks = album?.tracks?.items || [];
-    return tracks.slice(0, limit).map(trackToQuery).filter(Boolean);
+    const out = [];
+    let album = await spotifyGet(`/albums/${parsed.id}`);
+    let tracks = album?.tracks?.items || [];
+    out.push(...tracks.map(trackToQuery).filter(Boolean));
+
+    let next = album?.tracks?.next || null;
+    while (next && out.length < limit) {
+      const page = await spotifyGet(next.replace(API_BASE, ''));
+      const items = page?.items || [];
+      out.push(...items.map(trackToQuery).filter(Boolean));
+      next = page?.next || null;
+    }
+
+    return out.slice(0, limit);
   }
 
   if (parsed.type === 'playlist') {

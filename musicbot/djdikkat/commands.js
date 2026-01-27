@@ -368,7 +368,7 @@ async function handleInteraction(interaction) {
                 const edited = await oldMsg.edit(payload).then(() => true).catch(() => false);
                 if (edited) {
                   setStatsMessage(guildId, channelId, oldMsg.id);
-                  return;
+                  return interaction.reply({ content: '✅ Stats updated.', flags: MessageFlags.Ephemeral });
                 }
               }
             } else {
@@ -446,6 +446,7 @@ async function handleInteraction(interaction) {
           resetGuildMessages(guildId);
         } else {
           resetGuildMemory(guildId);
+          resetGuildMessages(guildId);
         }
         await interaction.deferUpdate().catch(() => {});
         await interaction.message.delete().catch(() => {});

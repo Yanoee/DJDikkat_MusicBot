@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * State manager
  * Guild state and timers
- * Build 2.0.1.6
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 const guildState = new Map();

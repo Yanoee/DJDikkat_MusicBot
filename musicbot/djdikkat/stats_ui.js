@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats UI
  * Stats embed builder
- * Build 2.0.4.22
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 
@@ -50,6 +50,14 @@ function buildStatsEmbed() {
 
   const topUrlMap = new Map(topUrls.map((u) => [u.title, u.key]));
   const getUrlForTitle = (title) => topUrlMap.get(title) || null;
+  const getAnyUrlForTitle = (title) => {
+    if (!title) return null;
+    if (topUrlMap.has(title)) return topUrlMap.get(title);
+    for (const [url, meta] of Object.entries(snap.totals.songsByUrl || {})) {
+      if (meta && meta.title === title) return url;
+    }
+    return null;
+  };
 
   const embed = new EmbedBuilder()
     .setTitle('📊 DJ DIKKAT Stats')
@@ -79,7 +87,7 @@ function buildStatsEmbed() {
       value: todayTop.length
         ? (() => {
           const title = truncateTitle(todayTop[0].key);
-          const url = getUrlForTitle(todayTop[0].key);
+          const url = getAnyUrlForTitle(todayTop[0].key);
           return url
             ? `⭐ [${title}](${url}) — ${todayTop[0].count}`
             : `⭐ ${title} — ${todayTop[0].count}`;
@@ -104,7 +112,7 @@ function buildStatsEmbed() {
       name: '🏅 Honorable mention',
       value: (() => {
         const title = truncateTitle(honorable);
-        const url = getUrlForTitle(honorable);
+        const url = getAnyUrlForTitle(honorable);
         return url ? `[${title}](${url})` : title;
       })(),
       inline: false

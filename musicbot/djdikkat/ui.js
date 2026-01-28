@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Ui/UX Emoji Container
  * Chat UI card and button layout
- * Build 2.0.4.15
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 const {

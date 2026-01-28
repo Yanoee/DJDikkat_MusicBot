@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Memory store
  * JSON-backed guild cache (history/settings)
- * Build 2.0.4.24
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 

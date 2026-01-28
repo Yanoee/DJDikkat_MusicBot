@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 2.0.4.0
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 const path = require('path');
@@ -17,6 +17,8 @@ const logger = require('./logs/logger');
 const { handleInteraction, deployCommands } = require('./commands');
 const { getState } = require('./state');
 const { disconnectGuild } = require('./player');
+
+logger.info('✅ Logger initialized');
 
 // ---------------- DISCORD CLIENT ----------------
 
@@ -72,6 +74,7 @@ client.on('raw', (p) => {
 client.once(Events.ClientReady, async () => {
   logger.info('🚀 Starting Dj Dikkat');
   logger.info(`✅ Logged in as ${client.user.tag}`);
+  logger.info(`🏠 Guilds: ${client.guilds.cache.size}`);
   await deployCommands(client);
   if (client.user) {
     client.user.setPresence({

@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 2.0.3.15
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 
@@ -340,9 +340,10 @@ async function handleInteraction(interaction) {
       }
 
       /* 📊 STATS */
-      if (commandName === 'stats') {
-        const payload = buildStatsChannelMessage(guildId);
-        const { messageId, channelId } = getStatsMessage(guildId);
+  if (commandName === 'stats') {
+    const payload = buildStatsChannelMessage(guildId);
+    const { messageId, channelId } = getStatsMessage(guildId);
+    const AUTO_DELETE_MS = 3 * 60 * 1000;
         // Fallback cleanup: remove recent bot stats cards in this channel
         if (interaction.channel?.messages) {
           const recent = await interaction.channel.messages.fetch({ limit: 20 }).catch(() => null);
@@ -368,6 +369,10 @@ async function handleInteraction(interaction) {
                 const edited = await oldMsg.edit(payload).then(() => true).catch(() => false);
                 if (edited) {
                   setStatsMessage(guildId, channelId, oldMsg.id);
+                  setTimeout(() => {
+                    oldMsg.delete().catch(() => {});
+                    clearStatsMessage(guildId);
+                  }, AUTO_DELETE_MS);
                   return interaction.reply({ content: '✅ Stats updated.', flags: MessageFlags.Ephemeral });
                 }
               }
@@ -382,6 +387,10 @@ async function handleInteraction(interaction) {
         const msg = await interaction.reply(payload);
         const message = msg?.id ? msg : await interaction.fetchReply();
         setStatsMessage(guildId, interaction.channelId, message.id);
+        setTimeout(() => {
+          message.delete().catch(() => {});
+          clearStatsMessage(guildId);
+        }, AUTO_DELETE_MS);
         return;
       }
 

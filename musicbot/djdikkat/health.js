@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder
- * Build 2.0.4.23
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 

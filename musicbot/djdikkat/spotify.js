@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Spotify fallback resolver
  * Spotify -> YouTube search queries
- * Build 2.0.2
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 

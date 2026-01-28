@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Player plug
  * Playback engine and Lavalink control
- * Build 2.0.3.13
+ * Build 2.0.5
  * Author: Yanoee
  ************************************************************/
 const {

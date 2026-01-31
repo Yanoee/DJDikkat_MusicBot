@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats UI
  * Stats embed builder
- * Build 2.0.5
+ * Build 2.0.6
  * Author: Yanoee
  ************************************************************/
 
@@ -124,21 +124,8 @@ function buildStatsEmbed() {
 
 module.exports = {
   buildStatsEmbed,
-  buildStatsMessage,
   buildStatsChannelMessage
 };
-
-function buildStatsMessage(userId) {
-  const embed = buildStatsEmbed();
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`dmremove:stats:${userId}`)
-      .setLabel('Remove')
-      .setEmoji('🗑️')
-      .setStyle(ButtonStyle.Secondary)
-  );
-  return { embeds: [embed], components: [row] };
-}
 
 function buildStatsChannelMessage(guildId) {
   const embed = buildStatsEmbed();

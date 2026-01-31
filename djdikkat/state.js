@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * State manager
  * Guild state and timers
- * Build 2.0.5
+ * Build 2.0.6
  * Author: Yanoee
  ************************************************************/
 const guildState = new Map();
@@ -23,9 +23,7 @@ function getState(guildId) {
       paused: false,
 
       // UI / VC
-      controller: null,
       voiceChannelId: null,
-      originalChannelName: null,
       client: null,
       textChannelId: null,
 
@@ -38,7 +36,6 @@ function getState(guildId) {
 
       // lifecycle
       disconnecting: false,
-      skipRequested: false,
       onPlayerEnd: null,
       playerListenerTarget: null,
 

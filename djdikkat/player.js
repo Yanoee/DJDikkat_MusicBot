@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Player plug
  * Playback engine and Lavalink control
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 const {
@@ -51,9 +51,41 @@ function buildVoiceStatusText(state) {
  * Pick first available Lavalink node
  * (same behavior as old code)
  */
+function isNodeConnected(node) {
+  const state = node?.state;
+  if (state === 2) return true;
+  if (typeof state === 'string' && state.toUpperCase() === 'CONNECTED') return true;
+  return false;
+}
+
 function pickNode(client) {
   const nodes = [...client.shoukaku.nodes.values()];
-  return nodes.find(n => n.state === 2) || nodes[0];
+  if (client.lavalinkReadyNodes && client.lavalinkReadyNodes.size > 0) {
+    const byReady = nodes.find(n => client.lavalinkReadyNodes.has(n.name));
+    if (byReady) return byReady;
+  }
+  return nodes.find(isNodeConnected) || null;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
+  const start = Date.now();
+  let node = pickNode(client);
+  while (!node && Date.now() - start < timeoutMs) {
+    await delay(intervalMs);
+    node = pickNode(client);
+  }
+  if (!node) {
+    const nodes = [...client.shoukaku.nodes.values()].map(n => ({
+      name: n.name,
+      state: n.state
+    }));
+    console.error('Lavalink node not ready after wait.', nodes);
+  }
+  return node;
 }
 
 /**
@@ -61,6 +93,7 @@ function pickNode(client) {
  */
 async function ensurePlayer(interaction) {
   const state = getState(interaction.guildId);
+  const t0 = Date.now();
   if (state.player) {
     if (state.playerListenerTarget !== state.player && state.onPlayerEnd) {
       state.player.on('end', state.onPlayerEnd);
@@ -78,7 +111,9 @@ async function ensurePlayer(interaction) {
     return state.player;
   }
 
+  const tFetchStart = Date.now();
   const member = await interaction.guild.members.fetch(interaction.user.id);
+  const tFetchMs = Date.now() - tFetchStart;
   if (!member.voice.channel) {
     throw new Error('Join a voice channel first.');
   }
@@ -86,9 +121,12 @@ async function ensurePlayer(interaction) {
   state.voiceChannelId = member.voice.channel.id;
   state.client = interaction.client;
 
-  const node = pickNode(interaction.client);
+  const tNodeStart = Date.now();
+  const node = await waitForNode(interaction.client);
+  const tNodeMs = Date.now() - tNodeStart;
   if (!node) throw new Error('Lavalink not ready.');
 
+  const tJoinStart = Date.now();
   try {
     state.player = await interaction.client.shoukaku.joinVoiceChannel({
       guildId: interaction.guildId,
@@ -110,11 +148,11 @@ async function ensurePlayer(interaction) {
       throw err;
     }
   }
+  const tJoinMs = Date.now() - tJoinStart;
 
   if (!state.onPlayerEnd) {
     state.onPlayerEnd = async () => {
       if (state.disconnecting) return;
-      state.skipRequested = false;
       state.current = null;
       state.paused = false;
       await playNext(interaction.guildId, interaction.client);
@@ -124,6 +162,8 @@ async function ensurePlayer(interaction) {
   state.player.on('end', state.onPlayerEnd);
   state.playerListenerTarget = state.player;
 
+  const tTotal = Date.now() - t0;
+  console.log(`Voice join timing: memberFetch=${tFetchMs}ms nodeWait=${tNodeMs}ms join=${tJoinMs}ms total=${tTotal}ms`);
   return state.player;
 }
 
@@ -136,8 +176,6 @@ async function playNext(guildId, client) {
   if (state.disconnecting) return;
 
   clearInactivity(state);
-  state.skipRequested = false;
-
   const next = state.queue.shift();
   if (!next) {
     state.current = null;
@@ -150,13 +188,13 @@ async function playNext(guildId, client) {
   state.current = next;
   state.paused = false;
 
-  recordPlay({
+  await recordPlay({
     title: next.info?.title,
     uri: next.info?.uri,
     userId: next.requesterId,
     userTag: next.requesterTag
   });
-  recordHistory(guildId, {
+  await recordHistory(guildId, {
     title: next.info?.title,
     url: next.info?.uri,
     userId: next.requesterId,
@@ -191,7 +229,6 @@ async function togglePause(guildId) {
 async function stopTrack(guildId) {
   const state = getState(guildId);
   if (!state.player || !state.current) return;
-  state.skipRequested = true;
   await state.player.stopTrack();
 }
 
@@ -202,7 +239,6 @@ async function stopPlayback(guildId) {
   const state = getState(guildId);
   state.queue = [];
   if (state.player && state.current) {
-    state.skipRequested = true;
     await state.player.stopTrack().catch(() => {});
   }
   if (state.client) {
@@ -237,7 +273,7 @@ async function disconnectGuild(guildId) {
       const msg = await channel.messages.fetch(messageId).catch(() => null);
       if (msg) await msg.delete().catch(() => {});
     }
-    clearStatsMessage(guildId);
+    await clearStatsMessage(guildId);
   }
 
   try {
@@ -262,10 +298,8 @@ async function disconnectGuild(guildId) {
   state.current = null;
   state.paused = false;
   state.voiceChannelId = null;
-  state.originalChannelName = null;
   state.client = null;
   state.textChannelId = null;
-  state.skipRequested = false;
   state.disconnecting = false;
 
   await removeController(guildId);

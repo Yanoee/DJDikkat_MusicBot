@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Spotify fallback resolver
  * Spotify -> YouTube search queries
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 
@@ -32,6 +32,8 @@ function parseSpotifyUrl(url) {
     if (parts[i] && /^intl-/i.test(parts[i])) i += 1;
     // Handle embed paths like /embed/track/{id}
     if (parts[i] === 'embed') i += 1;
+    // Handle legacy user playlists: /user/{user}/playlist/{id}
+    if (parts[i] === 'user' && parts[i + 2] === 'playlist') i += 2;
     const type = parts[i];
     const id = parts[i + 1];
     if (!type || !id) return null;
@@ -58,17 +60,20 @@ async function getToken() {
 
   const auth = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${auth}`,
       'Content-Type': 'application/x-www-form-urlencoded'
     },
+    signal: controller.signal,
     body
-  });
+  }).finally(() => clearTimeout(timeout));
 
   if (!res.ok) {
-    throw new Error(`Spotify token error: ${res.status}`);
+    throw new Error(`Spotify token error: ${res.status}. Check client id/secret.`);
   }
 
   const data = await res.json();
@@ -79,9 +84,12 @@ async function getToken() {
 
 async function spotifyGet(path) {
   const token = await getToken();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+    headers: { Authorization: `Bearer ${token}` },
+    signal: controller.signal
+  }).finally(() => clearTimeout(timeout));
   if (!res.ok) {
     throw new Error(`Spotify API error: ${res.status}`);
   }
@@ -98,7 +106,10 @@ async function resolveSpotifyTracks(url, limit = 3) {
   let parsed = parseSpotifyUrl(url);
   if (!parsed && /^https?:\/\/spotify\.link\//i.test(url)) {
     try {
-      const res = await fetch(url, { redirect: 'follow' });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      const res = await fetch(url, { redirect: 'follow', signal: controller.signal })
+        .finally(() => clearTimeout(timeout));
       parsed = parseSpotifyUrl(res.url);
     } catch {}
   }

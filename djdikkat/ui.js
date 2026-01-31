@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Ui/UX Emoji Container
  * Chat UI card and button layout
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 const {
@@ -163,7 +163,7 @@ async function upsertController(guildId, state) {
   const msg = await channel.send({ embeds: [embed], components }).catch(() => null);
   if (msg) {
     controllers.set(guildId, msg);
-    setUiMessage(guildId, channel.id, msg.id);
+    await setUiMessage(guildId, channel.id, msg.id);
   }
 }
 
@@ -187,36 +187,7 @@ async function repostController(guildId, state) {
 
   const msg = await channel.send({ embeds: [embed], components });
   controllers.set(guildId, msg);
-  setUiMessage(guildId, channel.id, msg.id);
-}
-
-/**
- * Recreate controller message after reconnect (idle)
- */
-async function recreateController(guildId, channelId, client) {
-  if (!channelId || !client) return;
-  const channel = client.channels.cache.get(channelId)
-    || await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || !channel.send) return;
-
-  const state = {
-    current: null,
-    paused: false,
-    queue: [],
-    inactivityUntil: null
-  };
-
-  const embed = buildEmbed(state);
-  const components = [buildButtons(guildId, false)];
-
-  if (controllers.has(guildId)) {
-    await controllers.get(guildId).delete().catch(() => {});
-    controllers.delete(guildId);
-  }
-
-  const msg = await channel.send({ embeds: [embed], components });
-  controllers.set(guildId, msg);
-  setUiMessage(guildId, channel.id, msg.id);
+  await setUiMessage(guildId, channel.id, msg.id);
 }
 
 /**
@@ -226,12 +197,11 @@ async function removeController(guildId) {
   if (!controllers.has(guildId)) return;
   await controllers.get(guildId).delete().catch(() => {});
   controllers.delete(guildId);
-  clearUiMessage(guildId);
+  await clearUiMessage(guildId);
 }
 
 module.exports = {
   upsertController,
   removeController,
-  repostController,
-  recreateController
+  repostController
 };

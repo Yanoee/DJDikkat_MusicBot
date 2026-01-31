@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 
@@ -45,12 +45,20 @@ function formatMs(ms) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+let lastCpu = process.cpuUsage();
+let lastCpuTime = Date.now();
+
 function averageCpuPercent() {
-  const cpu = process.cpuUsage();
-  const totalMs = (cpu.user + cpu.system) / 1000;
-  const upMs = process.uptime() * 1000;
+  const now = Date.now();
+  const elapsedMs = now - lastCpuTime;
+  if (elapsedMs <= 0) return 0;
+  const current = process.cpuUsage(lastCpu);
+  lastCpu = process.cpuUsage();
+  lastCpuTime = now;
+
+  const usedMs = (current.user + current.system) / 1000;
   const cores = os.cpus().length || 1;
-  const pct = (totalMs / (upMs * cores)) * 100;
+  const pct = (usedMs / (elapsedMs * cores)) * 100;
   return Number.isFinite(pct) ? pct : 0;
 }
 

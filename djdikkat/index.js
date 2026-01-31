@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 const path = require('path');
@@ -12,13 +12,23 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { Client, GatewayIntentBits, Events, ActivityType } = require('discord.js');
 const { Shoukaku, Connectors } = require('shoukaku');
 const pkg = require('../package.json');
-const logger = require('./logs/logger');
 
 const { handleInteraction, deployCommands } = require('./commands');
 const { getState } = require('./state');
 const { disconnectGuild } = require('./player');
 
-logger.info('✅ Logger initialized');
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
+const required = [
+  ['DISCORD_TOKEN/TOKEN', DISCORD_TOKEN],
+  ['LAVALINK_HOST', process.env.LAVALINK_HOST],
+  ['LAVALINK_PORT', process.env.LAVALINK_PORT],
+  ['LAVALINK_PASSWORD', process.env.LAVALINK_PASSWORD]
+];
+const missing = required.filter(([, value]) => !value).map(([key]) => key);
+if (missing.length) {
+  console.error(`Missing required env vars: ${missing.join(', ')}`);
+  process.exit(1);
+}
 
 // ---------------- DISCORD CLIENT ----------------
 
@@ -28,6 +38,7 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates
   ]
 });
+client.lavalinkReadyNodes = new Set();
 
 // ---------------- LAVALINK ----------------
 
@@ -44,38 +55,46 @@ const shoukaku = new Shoukaku(
 client.shoukaku = shoukaku;
 
 shoukaku.on('error', (nodeName, error) => {
-  logger.error(`[LAVALINK ERROR] Node ${nodeName}`, error);
+  console.error(`[LAVALINK ERROR] Node ${nodeName}`, error);
+});
+
+shoukaku.on('ready', (nodeName) => {
+  console.log(`✅ Lavalink node ready: ${nodeName}`);
+  client.lavalinkReadyNodes.add(nodeName);
+});
+
+shoukaku.on('disconnect', (nodeName, code, reason) => {
+  console.warn(`⚠️ Lavalink node disconnected: ${nodeName} (${code}) ${reason || ''}`);
+  client.lavalinkReadyNodes.delete(nodeName);
 });
 
 process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled rejection', reason);
+  console.error('Unhandled rejection', reason);
 });
 
 process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception', err);
+  console.error('Uncaught exception', err);
 });
 
 client.on('error', (err) => {
-  logger.error('Discord client error', err);
+  console.error('Discord client error', err);
 });
 
 client.on('warn', (info) => {
-  logger.warn('Discord client warn', { info });
-});
-
-// Forward raw voice packets (REQUIRED)
-client.on('raw', (p) => {
-  if (p.t === 'VOICE_SERVER_UPDATE') shoukaku.emit('VOICE_SERVER_UPDATE', p.d);
-  if (p.t === 'VOICE_STATE_UPDATE') shoukaku.emit('VOICE_STATE_UPDATE', p.d);
+  console.warn('Discord client warn', { info });
 });
 
 // ---------------- READY ----------------
 
 client.once(Events.ClientReady, async () => {
-  logger.info('🚀 Starting Dj Dikkat');
-  logger.info(`✅ Logged in as ${client.user.tag}`);
-  logger.info(`🏠 Guilds: ${client.guilds.cache.size}`);
-  await deployCommands(client);
+  console.log('🚀 Starting Dj Dikkat');
+  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`🏠 Guilds: ${client.guilds.cache.size}`);
+  if (process.env.DEPLOY_COMMANDS === 'true') {
+    await deployCommands(client);
+  } else {
+    console.log('ℹ️ DEPLOY_COMMANDS not set to true — skipping command deploy');
+  }
   if (client.user) {
     client.user.setPresence({
       activities: [{ name: pkg.description || 'DJ DIKKAT', type: ActivityType.Playing }],
@@ -109,5 +128,5 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
 // ---------------- LOGIN ----------------
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(DISCORD_TOKEN);
 

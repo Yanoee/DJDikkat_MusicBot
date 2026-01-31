@@ -2,18 +2,27 @@
  * DJ DIKKAT - Music Bot
  * Memory store
  * JSON-backed guild cache (history/settings)
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 
 const fs = require('fs');
 const path = require('path');
+const fsp = fs.promises;
 
 const DATA_DIR = path.join(__dirname, 'data/');
 const MEMORY_PATH = path.join(DATA_DIR, 'memory.json');
 const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
 const HISTORY_MAX = 200;
 const RECENT_MAX = 10;
+const WRITE_DEBOUNCE_MS = 250;
+
+let memoryCache = null;
+let messagesCache = null;
+let memoryWriteTimer = null;
+let messagesWriteTimer = null;
+let memoryWriteInFlight = Promise.resolve();
+let messagesWriteInFlight = Promise.resolve();
 
 function emptyMemory() {
   return {
@@ -30,39 +39,61 @@ function emptyMessages() {
 }
 
 function loadMemory() {
+  if (memoryCache) return memoryCache;
   try {
-    if (!fs.existsSync(MEMORY_PATH)) return emptyMemory();
+    if (!fs.existsSync(MEMORY_PATH)) {
+      memoryCache = emptyMemory();
+      return memoryCache;
+    }
     const raw = fs.readFileSync(MEMORY_PATH, 'utf8');
     const data = JSON.parse(raw);
-    return data && data.guilds ? data : emptyMemory();
+    memoryCache = data && data.guilds ? data : emptyMemory();
+    return memoryCache;
   } catch {
-    return emptyMemory();
+    memoryCache = emptyMemory();
+    return memoryCache;
   }
 }
 
 function loadMessages() {
+  if (messagesCache) return messagesCache;
   try {
-    if (!fs.existsSync(MESSAGES_PATH)) return emptyMessages();
+    if (!fs.existsSync(MESSAGES_PATH)) {
+      messagesCache = emptyMessages();
+      return messagesCache;
+    }
     const raw = fs.readFileSync(MESSAGES_PATH, 'utf8');
     const data = JSON.parse(raw);
-    return data && data.guilds ? data : emptyMessages();
+    messagesCache = data && data.guilds ? data : emptyMessages();
+    return messagesCache;
   } catch {
-    return emptyMessages();
+    messagesCache = emptyMessages();
+    return messagesCache;
   }
 }
 
-function saveMemory(mem) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(MEMORY_PATH, JSON.stringify(mem, null, 2), 'utf8');
-  } catch {}
+function scheduleMemoryWrite() {
+  if (memoryWriteTimer) return;
+  memoryWriteTimer = setTimeout(() => {
+    memoryWriteTimer = null;
+    const snapshot = memoryCache || emptyMemory();
+    memoryWriteInFlight = memoryWriteInFlight.then(async () => {
+      await fsp.mkdir(DATA_DIR, { recursive: true });
+      await fsp.writeFile(MEMORY_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
+    }).catch(() => {});
+  }, WRITE_DEBOUNCE_MS);
 }
 
-function saveMessages(mem) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(MESSAGES_PATH, JSON.stringify(mem, null, 2), 'utf8');
-  } catch {}
+function scheduleMessagesWrite() {
+  if (messagesWriteTimer) return;
+  messagesWriteTimer = setTimeout(() => {
+    messagesWriteTimer = null;
+    const snapshot = messagesCache || emptyMessages();
+    messagesWriteInFlight = messagesWriteInFlight.then(async () => {
+      await fsp.mkdir(DATA_DIR, { recursive: true });
+      await fsp.writeFile(MESSAGES_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
+    }).catch(() => {});
+  }, WRITE_DEBOUNCE_MS);
 }
 
 function ensureGuild(mem, guildId) {
@@ -111,7 +142,7 @@ function updateRecent(list, item, keyFn) {
   return next.slice(0, RECENT_MAX);
 }
 
-function recordHistory(guildId, { title, url, userId, userTag }) {
+async function recordHistory(guildId, { title, url, userId, userTag }) {
   if (!guildId) return;
   const mem = loadMemory();
   const guild = ensureGuild(mem, guildId);
@@ -139,29 +170,21 @@ function recordHistory(guildId, { title, url, userId, userTag }) {
     }, (x) => x.userId);
   }
 
-  saveMemory(mem);
+  scheduleMemoryWrite();
 }
 
-function setGuildSettings(guildId, patch) {
+async function setGuildSettings(guildId, patch) {
   if (!guildId) return;
   const mem = loadMemory();
   const guild = ensureGuild(mem, guildId);
   guild.settings = { ...guild.settings, ...patch };
-  saveMemory(mem);
+  scheduleMemoryWrite();
 }
 
 function getGuildMemory(guildId) {
   const mem = loadMemory();
   const guild = ensureGuild(mem, guildId);
   return guild;
-}
-
-function getAllGuildSettings() {
-  const mem = loadMemory();
-  return Object.entries(mem.guilds || {}).map(([guildId, data]) => ({
-    guildId,
-    settings: data?.settings || {}
-  }));
 }
 
 function getHistoryPage(guildId, page, pageSize) {
@@ -174,49 +197,40 @@ function getHistoryPage(guildId, page, pageSize) {
   return { entries: slice, page: safePage, totalPages, total };
 }
 
-function resetGuildMemory(guildId) {
+async function resetGuildMemory(guildId) {
   if (!guildId) return;
   const mem = loadMemory();
   mem.guilds[guildId] = undefined;
   delete mem.guilds[guildId];
-  saveMemory(mem);
+  scheduleMemoryWrite();
 }
 
-function resetGuildHistory(guildId) {
+async function resetGuildHistory(guildId) {
   if (!guildId) return;
   const mem = loadMemory();
   const guild = ensureGuild(mem, guildId);
   guild.history = [];
-  saveMemory(mem);
+  scheduleMemoryWrite();
 }
 
-function setUiMessage(guildId, channelId, messageId) {
+async function setUiMessage(guildId, channelId, messageId) {
   if (!guildId) return;
   const mem = loadMessages();
   const guild = ensureGuildMessages(mem, guildId);
   guild.messages = { ...guild.messages, uiMessageId: messageId || null, uiChannelId: channelId || null };
-  saveMessages(mem);
+  scheduleMessagesWrite();
 }
 
-function getUiMessage(guildId) {
-  const mem = loadMessages();
-  const guild = ensureGuildMessages(mem, guildId);
-  return {
-    messageId: guild.messages.uiMessageId || null,
-    channelId: guild.messages.uiChannelId || null
-  };
+async function clearUiMessage(guildId) {
+  await setUiMessage(guildId, null, null);
 }
 
-function clearUiMessage(guildId) {
-  setUiMessage(guildId, null, null);
-}
-
-function setStatsMessage(guildId, channelId, messageId) {
+async function setStatsMessage(guildId, channelId, messageId) {
   if (!guildId) return;
   const mem = loadMessages();
   const guild = ensureGuildMessages(mem, guildId);
   guild.messages = { ...guild.messages, statsMessageId: messageId || null, statsChannelId: channelId || null };
-  saveMessages(mem);
+  scheduleMessagesWrite();
 }
 
 function getStatsMessage(guildId) {
@@ -228,23 +242,22 @@ function getStatsMessage(guildId) {
   };
 }
 
-function clearStatsMessage(guildId) {
-  setStatsMessage(guildId, null, null);
+async function clearStatsMessage(guildId) {
+  await setStatsMessage(guildId, null, null);
 }
 
-function resetGuildMessages(guildId) {
+async function resetGuildMessages(guildId) {
   if (!guildId) return;
   const mem = loadMessages();
   mem.guilds[guildId] = undefined;
   delete mem.guilds[guildId];
-  saveMessages(mem);
+  scheduleMessagesWrite();
 }
 
 module.exports = {
   recordHistory,
   setGuildSettings,
   getGuildMemory,
-  getAllGuildSettings,
   getHistoryPage,
   resetGuildMemory,
   resetGuildHistory,
@@ -253,6 +266,5 @@ module.exports = {
   getStatsMessage,
   clearStatsMessage,
   setUiMessage,
-  getUiMessage,
   clearUiMessage
 };

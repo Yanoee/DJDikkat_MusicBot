@@ -2,18 +2,23 @@
  * DJ DIKKAT - Music Bot
  * Stats engine
  * JSON-backed play counters and rollups
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 
 const fs = require('fs');
 const path = require('path');
+const fsp = fs.promises;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const STATS_PATH = path.join(DATA_DIR, 'stats.json');
 const MAX_DAYS = 30;
+const WRITE_DEBOUNCE_MS = 250;
 let tracksSinceBoot = 0;
 let lastWriteTime = null;
+let statsCache = null;
+let statsWriteTimer = null;
+let statsWriteInFlight = Promise.resolve();
 
 function todayKey() {
   const d = new Date();
@@ -45,22 +50,33 @@ function emptyStats() {
 }
 
 function loadStats() {
+  if (statsCache) return statsCache;
   try {
-    if (!fs.existsSync(STATS_PATH)) return emptyStats();
+    if (!fs.existsSync(STATS_PATH)) {
+      statsCache = emptyStats();
+      return statsCache;
+    }
     const raw = fs.readFileSync(STATS_PATH, 'utf8');
     const data = JSON.parse(raw);
-    return data && data.totals && data.daily ? data : emptyStats();
+    statsCache = data && data.totals && data.daily ? data : emptyStats();
+    return statsCache;
   } catch {
-    return emptyStats();
+    statsCache = emptyStats();
+    return statsCache;
   }
 }
 
-function saveStats(stats) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(STATS_PATH, JSON.stringify(stats, null, 2), 'utf8');
-    lastWriteTime = new Date();
-  } catch {}
+function scheduleStatsWrite() {
+  if (statsWriteTimer) return;
+  statsWriteTimer = setTimeout(() => {
+    statsWriteTimer = null;
+    const snapshot = statsCache || emptyStats();
+    statsWriteInFlight = statsWriteInFlight.then(async () => {
+      await fsp.mkdir(DATA_DIR, { recursive: true });
+      await fsp.writeFile(STATS_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
+      lastWriteTime = new Date();
+    }).catch(() => {});
+  }, WRITE_DEBOUNCE_MS);
 }
 
 function increment(map, key, by = 1) {
@@ -68,7 +84,7 @@ function increment(map, key, by = 1) {
   map[key] = (map[key] || 0) + by;
 }
 
-function recordPlay({ title, uri, userId, userTag }) {
+async function recordPlay({ title, uri, userId, userTag }) {
   tracksSinceBoot += 1;
   const stats = loadStats();
   const day = todayKey();
@@ -124,7 +140,7 @@ function recordPlay({ title, uri, userId, userTag }) {
     if (kd < cutoff) delete stats.daily[k];
   });
 
-  saveStats(stats);
+  scheduleStatsWrite();
 }
 
 function topFromMap(map, limit = 3) {

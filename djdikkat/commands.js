@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 2.0.5
+ * Build 2.0.7
  * Author: Yanoee
  ************************************************************/
 
@@ -45,9 +45,18 @@ const { getHistoryPage, setGuildSettings, resetGuildMemory, resetGuildHistory, r
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 
 const BUTTON_COOLDOWN_MS = 5000;
+const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
+
+function pruneButtonCooldowns(state, now) {
+  if (state.buttonCooldowns.size < BUTTON_COOLDOWN_PRUNE_LIMIT) return;
+  for (const [userId, until] of state.buttonCooldowns.entries()) {
+    if (until <= now) state.buttonCooldowns.delete(userId);
+  }
+}
 
 function getButtonCooldownRemaining(state, userId) {
   const now = Date.now();
+  pruneButtonCooldowns(state, now);
   const until = state.buttonCooldowns.get(userId) || 0;
   if (until > now) return Math.ceil((until - now) / 1000);
   state.buttonCooldowns.set(userId, now + BUTTON_COOLDOWN_MS);
@@ -172,7 +181,7 @@ async function handleInteraction(interaction) {
         });
       }
 
-      setGuildSettings(guildId, {
+      await setGuildSettings(guildId, {
         defaultTextChannelId: interaction.channelId,
         lastCommandTime: new Date().toISOString()
       });
@@ -368,28 +377,28 @@ async function handleInteraction(interaction) {
               if (!deleted) {
                 const edited = await oldMsg.edit(payload).then(() => true).catch(() => false);
                 if (edited) {
-                  setStatsMessage(guildId, channelId, oldMsg.id);
+                  await setStatsMessage(guildId, channelId, oldMsg.id);
                   setTimeout(() => {
                     oldMsg.delete().catch(() => {});
-                    clearStatsMessage(guildId);
+                    clearStatsMessage(guildId).catch(() => {});
                   }, AUTO_DELETE_MS);
                   return interaction.reply({ content: '✅ Stats updated.', flags: MessageFlags.Ephemeral });
                 }
               }
             } else {
-              clearStatsMessage(guildId);
+              await clearStatsMessage(guildId);
             }
           } else {
-            clearStatsMessage(guildId);
+            await clearStatsMessage(guildId);
           }
         }
 
         const msg = await interaction.reply(payload);
         const message = msg?.id ? msg : await interaction.fetchReply();
-        setStatsMessage(guildId, interaction.channelId, message.id);
+        await setStatsMessage(guildId, interaction.channelId, message.id);
         setTimeout(() => {
           message.delete().catch(() => {});
-          clearStatsMessage(guildId);
+          clearStatsMessage(guildId).catch(() => {});
         }, AUTO_DELETE_MS);
         return;
       }
@@ -450,12 +459,12 @@ async function handleInteraction(interaction) {
           return interaction.reply({ content: '❌ Not your message', flags: MessageFlags.Ephemeral });
         }
         if (scope === 'history') {
-          resetGuildHistory(guildId);
+          await resetGuildHistory(guildId);
         } else if (scope === 'messages') {
-          resetGuildMessages(guildId);
+          await resetGuildMessages(guildId);
         } else {
-          resetGuildMemory(guildId);
-          resetGuildMessages(guildId);
+          await resetGuildMemory(guildId);
+          await resetGuildMessages(guildId);
         }
         await interaction.deferUpdate().catch(() => {});
         await interaction.message.delete().catch(() => {});
@@ -483,7 +492,7 @@ async function handleInteraction(interaction) {
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
           return interaction.reply({ content: '⛔ Admins only.', flags: MessageFlags.Ephemeral });
         }
-        clearStatsMessage(guildId);
+        await clearStatsMessage(guildId);
         await interaction.deferUpdate().catch(() => {});
         await interaction.message.delete().catch(() => {});
         return;

@@ -273,6 +273,8 @@ async function disconnectGuild(guildId) {
       const msg = await channel.messages.fetch(messageId).catch(() => null);
       if (msg) await msg.delete().catch(() => {});
     }
+  }
+  if (messageId || channelId) {
     await clearStatsMessage(guildId);
   }
 

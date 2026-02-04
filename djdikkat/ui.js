@@ -194,9 +194,10 @@ async function repostController(guildId, state) {
  * Remove controller message
  */
 async function removeController(guildId) {
-  if (!controllers.has(guildId)) return;
-  await controllers.get(guildId).delete().catch(() => {});
-  controllers.delete(guildId);
+  if (controllers.has(guildId)) {
+    await controllers.get(guildId).delete().catch(() => {});
+    controllers.delete(guildId);
+  }
   await clearUiMessage(guildId);
 }
 

@@ -165,6 +165,27 @@ function replyEphemeral(interaction, content) {
   return interaction.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
+async function canControlPlayback(interaction, state) {
+  if (!state?.voiceChannelId) return true;
+  if (!interaction.guild) return false;
+
+  let member = interaction.member;
+  if (!member?.voice) {
+    member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  }
+
+  const memberChannelId = member?.voice?.channelId || member?.voice?.channel?.id || null;
+  if (!memberChannelId) {
+    await replyEphemeral(interaction, '🔊 Join my voice channel first.');
+    return false;
+  }
+  if (memberChannelId !== state.voiceChannelId) {
+    await replyEphemeral(interaction, `🔒 You must be in <#${state.voiceChannelId}> to control playback.`);
+    return false;
+  }
+  return true;
+}
+
 // ================= INTERACTION HANDLER =================
 
 async function handleInteraction(interaction) {
@@ -198,7 +219,7 @@ async function handleInteraction(interaction) {
 
         const node = pickNode(interaction.client);
         if (!node) {
-          return interaction.followUp('❌ Lavalink not available');
+          return interaction.editReply('❌ Lavalink not available');
         }
 
         let tracks = [];
@@ -209,11 +230,11 @@ async function handleInteraction(interaction) {
             queries = await resolveSpotifyTracks(query, 25);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            return interaction.followUp(`❌ Spotify error: ${msg}`);
+            return interaction.editReply(`❌ Spotify error: ${msg}`);
           }
 
           if (!queries.length) {
-            return interaction.followUp('❌ No Spotify tracks found');
+            return interaction.editReply('❌ No Spotify tracks found');
           }
 
           for (const q of queries) {
@@ -247,7 +268,7 @@ async function handleInteraction(interaction) {
         }
 
         if (!tracks.length) {
-          return interaction.followUp('❌ No results found');
+          return interaction.editReply('❌ No results found');
         }
 
         tracks.forEach(t => {
@@ -258,7 +279,7 @@ async function handleInteraction(interaction) {
 
         await repostController(guildId, state);
 
-        await interaction.followUp(
+        await interaction.editReply(
           `✅ Added **${tracks.length}** track(s)`
         );
 
@@ -273,6 +294,7 @@ async function handleInteraction(interaction) {
       if (commandName === 'pause') {
         const state = getState(guildId);
         state.textChannelId = interaction.channelId;
+        if (!await canControlPlayback(interaction, state)) return;
         const paused = await togglePause(guildId);
         if (paused == null) {
           return interaction.reply({
@@ -291,6 +313,7 @@ async function handleInteraction(interaction) {
       if (commandName === 'skip') {
         const state = getState(guildId);
         state.textChannelId = interaction.channelId;
+        if (!await canControlPlayback(interaction, state)) return;
         if (!state.current) {
           return interaction.reply({
             content: '🔇 Nothing is playing',
@@ -309,6 +332,7 @@ async function handleInteraction(interaction) {
       if (commandName === 'queue') {
         const state = getState(guildId);
         state.textChannelId = interaction.channelId;
+        if (!await canControlPlayback(interaction, state)) return;
         await upsertController(guildId, state);
 
         const now = state.current
@@ -418,6 +442,8 @@ async function handleInteraction(interaction) {
 
       /* ❎ DISCONNECT */
       if (commandName === 'disconnect') {
+        const state = getState(guildId);
+        if (!await canControlPlayback(interaction, state)) return;
         await interaction.reply({
           content: '❎ Disconnecting…',
           flags: MessageFlags.Ephemeral
@@ -430,6 +456,7 @@ async function handleInteraction(interaction) {
       if (commandName === 'stop') {
         const state = getState(guildId);
         state.textChannelId = interaction.channelId;
+        if (!await canControlPlayback(interaction, state)) return;
         await stopPlayback(guildId);
         return interaction.reply({
           content: '⏹️ Stopped playback',
@@ -502,6 +529,7 @@ async function handleInteraction(interaction) {
       if (prefix !== 'music') return;
 
       const state = getState(guildId);
+      if (!await canControlPlayback(interaction, state)) return;
       const cd = getButtonCooldownRemaining(state, interaction.user.id);
       if (cd > 0) {
         return interaction.reply({

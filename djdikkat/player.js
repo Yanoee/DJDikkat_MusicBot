@@ -71,6 +71,21 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function normalizeEndReason(endEvent) {
+  const direct = endEvent?.reason;
+  if (typeof direct === 'string' && direct) return direct.toUpperCase();
+  const nested = endEvent?.data?.reason;
+  if (typeof nested === 'string' && nested) return nested.toUpperCase();
+  return '';
+}
+
+function isCleanupLikeEnd(endEvent) {
+  const reason = normalizeEndReason(endEvent);
+  if (reason === 'CLEANUP') return true;
+  const type = typeof endEvent?.type === 'string' ? endEvent.type.toUpperCase() : '';
+  return type === 'WEBSOCKETCLOSEDEVENT';
+}
+
 async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
   const start = Date.now();
   let node = pickNode(client);
@@ -151,10 +166,21 @@ async function ensurePlayer(interaction) {
   const tJoinMs = Date.now() - tJoinStart;
 
   if (!state.onPlayerEnd) {
-    state.onPlayerEnd = async () => {
+    state.onPlayerEnd = async (endEvent) => {
       if (state.disconnecting) return;
+      const previous = state.current;
+      const reason = normalizeEndReason(endEvent);
+      if (reason) {
+        console.log(`Track ended in guild ${interaction.guildId} with reason: ${reason}`);
+      }
       state.current = null;
       state.paused = false;
+      if (isCleanupLikeEnd(endEvent)) {
+        // Keep queue intact on websocket/voice cleanup so tracks are not drained.
+        if (previous) state.queue.unshift(previous);
+        await upsertController(interaction.guildId, state);
+        return;
+      }
       await playNext(interaction.guildId, interaction.client);
     };
   }

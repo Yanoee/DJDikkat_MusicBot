@@ -165,6 +165,56 @@ function replyEphemeral(interaction, content) {
   return interaction.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
+const SEARCH_AVOID_WORDS = ['live', 'remix', 'extended'];
+const SEARCH_AVOID_RE = new RegExp(`\\b(${SEARCH_AVOID_WORDS.join('|')})\\b`, 'i');
+
+function stripBrackets(input) {
+  return String(input || '').replace(/\s*[\(\[].*?[\)\]]\s*/g, ' ').trim();
+}
+
+function buildSearchQuery(input) {
+  const base = stripBrackets(input)
+    .replace(SEARCH_AVOID_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const suffix = 'official audio -live -remix -extended';
+  if (!base) return suffix;
+  return `${base} ${suffix}`.trim();
+}
+
+function extractTracks(data) {
+  if (Array.isArray(data)) return data;
+  if (data?.tracks && Array.isArray(data.tracks)) return data.tracks;
+  if (data?.encoded) return [data];
+  return [];
+}
+
+function isUndesiredTitle(title) {
+  return SEARCH_AVOID_RE.test(title || '');
+}
+
+function isOfficialTitle(title) {
+  return /official\s+audio/i.test(title || '') || /\bofficial\b/i.test(title || '');
+}
+
+function pickBestTrack(data) {
+  const tracks = extractTracks(data);
+  if (!tracks.length) return [];
+
+  const withoutUndesired = tracks.filter(t => !isUndesiredTitle(t?.info?.title));
+  const candidates = withoutUndesired.length ? withoutUndesired : tracks;
+  const official = candidates.filter(t => isOfficialTitle(t?.info?.title));
+  const pool = official.length ? official : candidates;
+  const withLength = pool.filter(t => Number.isFinite(t?.info?.length) && t.info.length > 0);
+
+  if (withLength.length) {
+    withLength.sort((a, b) => a.info.length - b.info.length);
+    return [withLength[0]];
+  }
+
+  return [pool[0]];
+}
+
 async function canControlPlayback(interaction, state) {
   if (!state?.voiceChannelId) return true;
   if (!interaction.guild) return false;
@@ -238,33 +288,28 @@ async function handleInteraction(interaction) {
           }
 
           for (const q of queries) {
-            const result = await loadTracks(node, `ytmsearch:${q}`);
-            const data = result?.data ?? result;
-            let found = null;
-            if (Array.isArray(data)) {
-              found = data[0] || null;
-            } else if (data?.tracks && Array.isArray(data.tracks)) {
-              found = data.tracks[0] || null;
-            } else if (data?.encoded) {
-              found = data;
+            const searchQuery = buildSearchQuery(q);
+            const primary = await loadTracks(node, `ytmsearch:${searchQuery}`);
+            let picked = pickBestTrack(primary?.data ?? primary);
+            if (!picked.length) {
+              const fallback = await loadTracks(node, `ytsearch:${searchQuery}`);
+              picked = pickBestTrack(fallback?.data ?? fallback);
             }
-            if (found) tracks.push(found);
+            if (picked.length) tracks.push(picked[0]);
           }
         } else {
-          const identifier = query.startsWith('http')
-            ? query
-            : `ytsearch:${query}`;
-
-          const result = await loadTracks(node, identifier);
-          const data = result?.data ?? result;
-          const isSearch = identifier.startsWith('ytsearch:');
-
-          if (Array.isArray(data)) {
-            tracks = isSearch ? data.slice(0, 1) : data;
-          } else if (data?.tracks && Array.isArray(data.tracks)) {
-            tracks = isSearch ? data.tracks.slice(0, 1) : data.tracks;
-          } else if (data?.encoded) {
-            tracks = [data];
+          const isUrl = query.startsWith('http');
+          if (isUrl) {
+            const result = await loadTracks(node, query);
+            tracks = extractTracks(result?.data ?? result);
+          } else {
+            const searchQuery = buildSearchQuery(query);
+            const primary = await loadTracks(node, `ytmsearch:${searchQuery}`);
+            tracks = pickBestTrack(primary?.data ?? primary);
+            if (!tracks.length) {
+              const fallback = await loadTracks(node, `ytsearch:${searchQuery}`);
+              tracks = pickBestTrack(fallback?.data ?? fallback);
+            }
           }
         }
 

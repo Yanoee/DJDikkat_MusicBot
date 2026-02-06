@@ -257,11 +257,12 @@ async function handleInteraction(interaction) {
 
           const result = await loadTracks(node, identifier);
           const data = result?.data ?? result;
+          const isSearch = identifier.startsWith('ytsearch:');
 
           if (Array.isArray(data)) {
-            tracks = data;
+            tracks = isSearch ? data.slice(0, 1) : data;
           } else if (data?.tracks && Array.isArray(data.tracks)) {
-            tracks = data.tracks;
+            tracks = isSearch ? data.tracks.slice(0, 1) : data.tracks;
           } else if (data?.encoded) {
             tracks = [data];
           }

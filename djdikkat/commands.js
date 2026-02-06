@@ -238,7 +238,7 @@ async function handleInteraction(interaction) {
           }
 
           for (const q of queries) {
-            const result = await loadTracks(node, `ytsearch:${q}`);
+            const result = await loadTracks(node, `ytmsearch:${q}`);
             const data = result?.data ?? result;
             let found = null;
             if (Array.isArray(data)) {

@@ -48,18 +48,6 @@ If you found this repository, feel free to look around — but this project is *
 
 ---
 
-## 🚀 Usage
-
-This bot is intended for **private use only**.
-
-To run it yourself, you will need:
-- A Discord bot token
-- Spotify API credentials
-- A running Lavalink server
-- A properly configured `.env` file
-
----
-
 ## 🖤 Dedication
 
 This project is dedicated to **DJ Dikkat (Mehmet Aykın)**.  
@@ -74,6 +62,7 @@ Please use it responsibly and do not misuse its name or intent.
 
 ### Author
 - [@Yanoee](https://www.github.com/Yanoee)
+
 
 
 

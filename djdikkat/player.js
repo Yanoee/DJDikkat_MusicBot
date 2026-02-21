@@ -330,7 +330,7 @@ async function disconnectGuild(guildId) {
   state.textChannelId = null;
   state.disconnecting = false;
 
-  await removeController(guildId);
+  await removeController(guildId, state.client);
   clearState(guildId);
 }
 

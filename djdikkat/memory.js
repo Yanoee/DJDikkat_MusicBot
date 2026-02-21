@@ -242,6 +242,15 @@ function getStatsMessage(guildId) {
   };
 }
 
+function getUiMessage(guildId) {
+  const mem = loadMessages();
+  const guild = ensureGuildMessages(mem, guildId);
+  return {
+    messageId: guild.messages.uiMessageId || null,
+    channelId: guild.messages.uiChannelId || null
+  };
+}
+
 async function clearStatsMessage(guildId) {
   await setStatsMessage(guildId, null, null);
 }
@@ -264,6 +273,7 @@ module.exports = {
   resetGuildMessages,
   setStatsMessage,
   getStatsMessage,
+  getUiMessage,
   clearStatsMessage,
   setUiMessage,
   clearUiMessage

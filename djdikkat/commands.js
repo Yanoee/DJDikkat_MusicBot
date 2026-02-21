@@ -46,6 +46,8 @@ const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 
 const BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
+const QUEUE_TITLE_LIMIT = 60;
+const QUEUE_PAGE_SIZE = 10;
 
 function pruneButtonCooldowns(state, now) {
   if (state.buttonCooldowns.size < BUTTON_COOLDOWN_PRUNE_LIMIT) return;
@@ -175,6 +177,72 @@ function extractTracks(data) {
 function pickFirstTrack(data) {
   const tracks = extractTracks(data);
   return tracks.length ? [tracks[0]] : [];
+}
+
+function truncateQueueTitle(title) {
+  const text = (title || 'Unknown').trim();
+  if (text.length <= QUEUE_TITLE_LIMIT) return text;
+  return `${text.slice(0, QUEUE_TITLE_LIMIT - 1)}…`;
+}
+
+function getQueuePageData(state, page, pageSize = QUEUE_PAGE_SIZE) {
+  const queue = Array.isArray(state?.queue) ? state.queue : [];
+  const total = queue.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * pageSize;
+  const entries = queue.slice(start, start + pageSize);
+  return { entries, page: safePage, totalPages, total };
+}
+
+function buildQueueComponents(guildId, page, totalPages, userId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`queuepage:prev:${guildId}:${page}:${userId}`)
+        .setLabel('Prev')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(page <= 1),
+      new ButtonBuilder()
+        .setCustomId(`queuepage:next:${guildId}:${page}:${userId}`)
+        .setLabel('Next')
+        .setEmoji('⏭️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(page >= totalPages)
+    )
+  ];
+}
+
+function buildQueueContent(state, pageData) {
+  const now = state.current?.info?.title
+    ? state.current.info.title
+    : 'Nothing playing';
+
+  const list = pageData.entries.length
+    ? pageData.entries
+        .map((t, idx) => {
+          const n = (pageData.page - 1) * QUEUE_PAGE_SIZE + idx + 1;
+          const title = truncateQueueTitle(t.info?.title);
+          const uri = t.info?.uri || null;
+          const label = uri ? `[${title}](${uri})` : title;
+          const requestedBy = t.requesterId ? `<@${t.requesterId}>` : (t.requesterTag || 'Unknown');
+          return `${n}. ${label} || ${requestedBy}`;
+        })
+        .join('\n')
+    : '—';
+
+  const safeNow = truncateQueueTitle(now);
+  let description = `🎶 **Now Playing:** ${safeNow}\n\n📜 **Up next:**\n${list}`;
+  if (description.length > 4000) {
+    description = `${description.slice(0, 3997)}...`;
+  }
+
+  return new EmbedBuilder()
+    .setTitle('📜 Queue')
+    .setColor(0x2b6cb0)
+    .setDescription(description)
+    .setFooter({ text: `Page ${pageData.page}/${pageData.totalPages} • ${pageData.total} track(s)` });
 }
 
 async function canControlPlayback(interaction, state) {
@@ -340,20 +408,14 @@ async function handleInteraction(interaction) {
         state.textChannelId = interaction.channelId;
         if (!await canControlPlayback(interaction, state)) return;
         await upsertController(guildId, state);
-
-        const now = state.current
-          ? `🎶 **Now Playing:** ${state.current.info.title}`
-          : '🎶 **Now Playing:** Nothing playing';
-
-        const list = state.queue.length
-          ? state.queue
-              .slice(0, 10)
-              .map((t, i) => `${i + 1}. ${t.info.title}`)
-              .join('\n')
-          : '—';
+        const pageData = getQueuePageData(state, 1);
+        const components = buildQueueComponents(guildId, pageData.page, pageData.totalPages, interaction.user.id);
+        const embed = buildQueueContent(state, pageData);
 
         return interaction.reply({
-          content: `${now}\n\n📜 **Up next:**\n${list}`,
+          content: '',
+          embeds: [embed],
+          components,
           flags: MessageFlags.Ephemeral
         });
       }
@@ -519,6 +581,24 @@ async function handleInteraction(interaction) {
         await interaction.update({ embeds: [embed], components }).catch(() => {});
         return;
       }
+      if (interaction.customId && interaction.customId.startsWith('queuepage:')) {
+        const parts = interaction.customId.split(':');
+        const action = parts[1];
+        const guildId = parts[2];
+        const page = parseInt(parts[3], 10) || 1;
+        const userId = parts[4];
+        if (userId !== interaction.user.id) {
+          return interaction.reply({ content: '❌ Not your message', flags: MessageFlags.Ephemeral });
+        }
+        const state = getState(guildId);
+        if (!await canControlPlayback(interaction, state)) return;
+        const nextPage = action === 'next' ? page + 1 : page - 1;
+        const pageData = getQueuePageData(state, nextPage);
+        const embed = buildQueueContent(state, pageData);
+        const components = buildQueueComponents(guildId, pageData.page, pageData.totalPages, userId);
+        await interaction.update({ content: '', embeds: [embed], components }).catch(() => {});
+        return;
+      }
       if (interaction.customId && interaction.customId.startsWith('statsremove:')) {
         const parts = interaction.customId.split(':');
         const guildId = parts[1];
@@ -579,21 +659,13 @@ async function handleInteraction(interaction) {
       if (action === 'queue') {
         state.textChannelId = interaction.channelId;
         await upsertController(guildId, state);
-
-        const now = state.current
-          ? `🎶 **Now Playing:** ${state.current.info.title}`
-          : '🎶 **Now Playing:** Nothing playing';
-
-        const list = state.queue.length
-          ? state.queue
-              .slice(0, 10)
-              .map((t, i) => `${i + 1}. ${t.info.title}`)
-              .join('\n')
-          : '—';
-
-        return interaction.followUp({
-          content: `${now}\n\n📜 **Up next:**\n${list}`,
-          flags: MessageFlags.Ephemeral
+        const pageData = getQueuePageData(state, 1);
+        const embed = buildQueueContent(state, pageData);
+        const components = buildQueueComponents(guildId, pageData.page, pageData.totalPages, interaction.user.id);
+        return interaction.editReply({
+          content: '',
+          embeds: [embed],
+          components
         });
       }
 

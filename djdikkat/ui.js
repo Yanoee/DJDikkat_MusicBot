@@ -13,11 +13,12 @@ const {
 } = require('discord.js');
 
 const { getInactivityRemaining, clearIdleUiTimer } = require('./state');
-const { setUiMessage, clearUiMessage } = require('./memory');
+const { setUiMessage, getUiMessage, clearUiMessage } = require('./memory');
 
 // guildId -> controller message
 const controllers = new Map();
 const IDLE_REFRESH_MS = 15000;
+const QUEUE_TITLE_LIMIT = 60;
 
 /**
  * Format milliseconds as H:MM:SS or M:SS
@@ -30,6 +31,12 @@ function formatMs(ms) {
   const h = Math.floor(total / 3600);
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function truncateQueueTitle(title) {
+  const text = (title || 'Unknown').trim();
+  if (text.length <= QUEUE_TITLE_LIMIT) return text;
+  return `${text.slice(0, QUEUE_TITLE_LIMIT - 1)}…`;
 }
 
 /**
@@ -65,10 +72,13 @@ function buildEmbed(state) {
 
   const queuePreview = state.queue.slice(0, 5).map((t, i) => {
     const tInfo = t.info || {};
-    const tTitle = tInfo.title || 'Unknown';
+    const tTitle = truncateQueueTitle(tInfo.title);
     const tUri = tInfo.uri || null;
     const label = tUri ? `[${tTitle}](${tUri})` : tTitle;
-    return `${i + 1}. ${label}`;
+    const requestedBy = t.requesterId
+      ? `<@${t.requesterId}>`
+      : (t.requesterTag || 'Unknown');
+    return `${i + 1}. ${label} || ${requestedBy}`;
   });
 
   embed.setDescription(
@@ -98,6 +108,35 @@ function startIdleRefresh(guildId, state) {
     }
     await upsertController(guildId, state);
   }, IDLE_REFRESH_MS);
+}
+
+async function resolveControllerMessage(guildId, client, preferredChannel = null) {
+  if (controllers.has(guildId)) return controllers.get(guildId);
+  if (!client) return null;
+
+  const { messageId, channelId } = getUiMessage(guildId);
+  if (!messageId || !channelId) return null;
+
+  const channel = (preferredChannel && preferredChannel.id === channelId)
+    ? preferredChannel
+    : (
+      client.channels.cache.get(channelId)
+      || await client.channels.fetch(channelId).catch(() => null)
+    );
+
+  if (!channel?.messages) {
+    await clearUiMessage(guildId);
+    return null;
+  }
+
+  const msg = await channel.messages.fetch(messageId).catch(() => null);
+  if (!msg) {
+    await clearUiMessage(guildId);
+    return null;
+  }
+
+  controllers.set(guildId, msg);
+  return msg;
 }
 
 /**
@@ -151,13 +190,14 @@ async function upsertController(guildId, state) {
     startIdleRefresh(guildId, state);
   }
 
-  if (controllers.has(guildId)) {
-    const current = controllers.get(guildId);
+  const current = await resolveControllerMessage(guildId, state.client, channel);
+  if (current) {
     const edited = await current.edit({ embeds: [embed], components })
       .then(() => true)
       .catch(() => false);
     if (edited) return;
     controllers.delete(guildId);
+    await clearUiMessage(guildId);
   }
 
   const msg = await channel.send({ embeds: [embed], components }).catch(() => null);
@@ -180,9 +220,11 @@ async function repostController(guildId, state) {
   const embed = buildEmbed(state);
   const components = [buildButtons(guildId, state.paused)];
 
-  if (controllers.has(guildId)) {
-    await controllers.get(guildId).delete().catch(() => {});
+  const current = await resolveControllerMessage(guildId, state.client, channel);
+  if (current) {
+    await current.delete().catch(() => {});
     controllers.delete(guildId);
+    await clearUiMessage(guildId);
   }
 
   const msg = await channel.send({ embeds: [embed], components });
@@ -193,9 +235,10 @@ async function repostController(guildId, state) {
 /**
  * Remove controller message
  */
-async function removeController(guildId) {
-  if (controllers.has(guildId)) {
-    await controllers.get(guildId).delete().catch(() => {});
+async function removeController(guildId, client = null) {
+  const current = controllers.get(guildId) || await resolveControllerMessage(guildId, client);
+  if (current) {
+    await current.delete().catch(() => {});
     controllers.delete(guildId);
   }
   await clearUiMessage(guildId);

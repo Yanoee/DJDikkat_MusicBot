@@ -21,6 +21,7 @@ const { getState, getActiveVoiceCount } = require('./state');
 const { disconnectGuild } = require('./player');
 const { sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { startInternalServer } = require('./internal-server');
+const { getAllSavedUiMessages, clearUiMessage } = require('./memory');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const required = [
@@ -107,6 +108,7 @@ client.once(Events.ClientReady, async () => {
     });
   }
 
+  await cleanupStaleCards(client);
   await announceOnStartup(client);
   setInterval(() => announceWeekly(client), 60 * 60 * 1000);
 
@@ -115,6 +117,24 @@ client.once(Events.ClientReady, async () => {
 
   startHeartbeat(client, getActiveVoiceCount);
 });
+
+async function cleanupStaleCards(client) {
+  const saved = getAllSavedUiMessages();
+  for (const { guildId, channelId, messageId } of saved) {
+    try {
+      const channel = client.channels.cache.get(channelId)
+        || await client.channels.fetch(channelId).catch(() => null);
+      if (channel?.messages) {
+        const msg = await channel.messages.fetch(messageId).catch(() => null);
+        if (msg) await msg.delete().catch(() => {});
+      }
+    } catch {}
+    await clearUiMessage(guildId);
+  }
+  if (saved.length > 0) {
+    console.log(`🧹 Cleaned up ${saved.length} stale card(s) from previous session`);
+  }
+}
 
 async function announceOnStartup(client) {
   for (const guild of client.guilds.cache.values()) {

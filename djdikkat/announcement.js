@@ -24,7 +24,7 @@ function buildAnnouncementEmbed() {
       { name: '💡 Free forever', value: 'No paid plan now, no paid plan later.', inline: false },
       { name: '🙌 Support', value: 'If you enjoy the bot, donations are welcome but not expected.', inline: false },
       { name: '🌐 Website', value: '[www.djdikkat.com](https://www.djdikkat.com)', inline: false },
-      { name: '👤 Author', value: '@Yanoee (Discord: Yanoee#1995)', inline: false }
+      { name: '👤 Author', value: '[Yanoee](https://github.com/Yanoee)', inline: false }
     );
 }
 
@@ -131,7 +131,55 @@ async function sendAnnouncement(guild, client, preferredChannelId = null) {
   return true;
 }
 
+async function sendOwnerWelcome(guild, client) {
+  if (!guild || !client) return;
+  try {
+    const owner = await client.users.fetch(guild.ownerId);
+    if (!owner) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`👋 DJ DIKKAT joined ${guild.name}!`)
+      .setColor(0x2b6cb0)
+      .setDescription(
+        'Thanks for adding me! Here\'s a quick overview to get started.'
+      )
+      .addFields(
+        {
+          name: '🎵 Quick Start',
+          value: [
+            '`/play <song or URL>` — Search or paste a YouTube / Spotify link',
+            '`/skip` — Skip the current track',
+            '`/pause` — Pause / Resume',
+            '`/stop` — Stop playback (bot stays in voice)',
+            '`/queue` — View the current queue',
+            '`/disconnect` — Disconnect the bot',
+            '`/history` — View recently played tracks',
+            '`/stats` — Music stats for this server',
+          ].join('\n'),
+          inline: false
+        },
+        {
+          name: '🔒 Permissions needed',
+          value: '`Connect` · `Speak` · `Send Messages` · `Embed Links` · `Read Message History`\nMake sure I have these in your music channel.',
+          inline: false
+        },
+        {
+          name: '🌐 Website & Support',
+          value: '[www.djdikkat.com](https://www.djdikkat.com) — info, bug reports & donations',
+          inline: false
+        }
+      )
+      .setFooter({ text: 'This is a one-time setup message • DJ DIKKAT' })
+      .setTimestamp();
+
+    await owner.send({ embeds: [embed] });
+  } catch (err) {
+    console.warn(`Could not DM owner of guild ${guild.id}: ${err.message}`);
+  }
+}
+
 module.exports = {
   sendAnnouncement,
-  sendCustomToAll
+  sendCustomToAll,
+  sendOwnerWelcome
 };

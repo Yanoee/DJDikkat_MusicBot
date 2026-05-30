@@ -254,6 +254,20 @@ function getUiMessage(guildId) {
   };
 }
 
+function getAllSavedUiMessages() {
+  const results = [];
+  const guildsDir = path.join(DATA_DIR, 'guilds');
+  if (!fs.existsSync(guildsDir)) return results;
+  const entries = fs.readdirSync(guildsDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const guildId = entry.name;
+    const { messageId, channelId } = getUiMessage(guildId);
+    if (messageId && channelId) results.push({ guildId, messageId, channelId });
+  }
+  return results;
+}
+
 // ── Public API — stats message tracking ──────────────────
 
 async function setStatsMessage(guildId, channelId, messageId) {
@@ -289,6 +303,7 @@ module.exports = {
   setUiMessage,
   clearUiMessage,
   getUiMessage,
+  getAllSavedUiMessages,
   setStatsMessage,
   clearStatsMessage,
   getStatsMessage

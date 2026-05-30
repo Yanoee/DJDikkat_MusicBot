@@ -234,18 +234,22 @@ function buildIdleButtons(guildId, lastPlayed) {
         .setCustomId(`music:replay:${guildId}`)
         .setLabel('Play Again')
         .setEmoji('⏮️')
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`music:disconnect:${guildId}`)
+        .setEmoji('🔌')
+        .setStyle(ButtonStyle.Danger)
     )
   ];
 }
 
 /**
  * Build controller buttons
- * Row 1: [⏸/▶ Pause] [⏭ Skip] [Loop: Off/Track/Queue] [⏹ Stop]
- * Row 2: [📜 Queue] [🔀 Shuffle] [🧹 Clear]
+ * Row 1: [⏸/▶ Pause] [⏭ Skip] [⏹ Stop]
+ * Row 2: [🔁/🔂 Loop] [🔀 Shuffle] [📜 Queue] [🧹 Clear]
  */
 function buildButtons(guildId, paused, loopCurrent, loopQueue) {
-  const loopLabel = loopCurrent ? 'Loop: Track' : loopQueue ? 'Loop: Queue' : 'Loop: Off';
+  const loopEmoji = loopCurrent ? '🔂' : '🔁';
   const loopStyle = (loopCurrent || loopQueue) ? ButtonStyle.Success : ButtonStyle.Secondary;
 
   return [
@@ -261,24 +265,24 @@ function buildButtons(guildId, paused, loopCurrent, loopQueue) {
         .setStyle(ButtonStyle.Secondary),
 
       new ButtonBuilder()
-        .setCustomId(`music:loop:${guildId}`)
-        .setLabel(loopLabel)
-        .setStyle(loopStyle),
-
-      new ButtonBuilder()
         .setCustomId(`music:stop:${guildId}`)
         .setEmoji('⏹️')
         .setStyle(ButtonStyle.Danger)
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`music:queue:${guildId}`)
-        .setEmoji('📜')
-        .setStyle(ButtonStyle.Secondary),
+        .setCustomId(`music:loop:${guildId}`)
+        .setEmoji(loopEmoji)
+        .setStyle(loopStyle),
 
       new ButtonBuilder()
         .setCustomId(`music:shuffle:${guildId}`)
         .setEmoji('🔀')
+        .setStyle(ButtonStyle.Secondary),
+
+      new ButtonBuilder()
+        .setCustomId(`music:queue:${guildId}`)
+        .setEmoji('📜')
         .setStyle(ButtonStyle.Secondary),
 
       new ButtonBuilder()

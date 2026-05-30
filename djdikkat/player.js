@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Player plug
  * Playback engine and Lavalink control
- * Build 2.0.7
+ * Build 3.0.0
  * Author: Yanoee
  ************************************************************/
 const {
@@ -14,7 +14,8 @@ const {
 
 const {
   upsertController,
-  removeController
+  removeController,
+  repostController
 } = require('./ui');
 const { recordHistory, getStatsMessage, clearStatsMessage } = require('./memory');
 const { recordPlay } = require('./stats');
@@ -96,7 +97,6 @@ async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
 async function ensurePlayer(interaction) {
   const guildId = interaction.guildId;
   const state = getState(guildId);
-  const t0 = Date.now();
   if (state.player) {
     if (state.playerListenerTarget !== state.player && state.onPlayerEnd) {
       state.player.on('end', state.onPlayerEnd);
@@ -114,9 +114,7 @@ async function ensurePlayer(interaction) {
     return state.player;
   }
 
-  const tFetchStart = Date.now();
   const member = await interaction.guild.members.fetch(interaction.user.id);
-  const tFetchMs = Date.now() - tFetchStart;
   if (!member.voice.channel) {
     throw new Error('Join a voice channel first.');
   }
@@ -124,12 +122,9 @@ async function ensurePlayer(interaction) {
   state.voiceChannelId = member.voice.channel.id;
   state.client = interaction.client;
 
-  const tNodeStart = Date.now();
   const node = await waitForNode(interaction.client);
-  const tNodeMs = Date.now() - tNodeStart;
   if (!node) throw new Error('Lavalink not ready.');
 
-  const tJoinStart = Date.now();
   try {
     state.player = await interaction.client.shoukaku.joinVoiceChannel({
       guildId,
@@ -151,16 +146,12 @@ async function ensurePlayer(interaction) {
       throw err;
     }
   }
-  const tJoinMs = Date.now() - tJoinStart;
 
   if (!state.onPlayerEnd) {
     state.onPlayerEnd = async (endEvent) => {
       if (state.disconnecting) return;
       const previous = state.current;
       const reason = normalizeEndReason(endEvent);
-      if (reason) {
-        console.log(`Track ended in guild ${guildId} with reason: ${reason}`);
-      }
       if (isCleanupLikeEnd(endEvent)) {
         state.current = null;
         state.paused = false;
@@ -176,6 +167,13 @@ async function ensurePlayer(interaction) {
         const replayed = await replayCurrent(guildId);
         if (replayed) return;
       }
+      // loopQueue: push finished track back to end of queue
+      if (state.loopQueue && previous && canLoop) {
+        state.queue.push(previous);
+      }
+      if (previous) {
+        state.lastPlayed = { title: previous.info?.title, uri: previous.info?.uri };
+      }
       state.current = null;
       state.paused = false;
       await playNext(guildId, state.client);
@@ -185,8 +183,6 @@ async function ensurePlayer(interaction) {
   state.player.on('end', state.onPlayerEnd);
   state.playerListenerTarget = state.player;
 
-  const tTotal = Date.now() - t0;
-  console.log(`Voice join timing: memberFetch=${tFetchMs}ms nodeWait=${tNodeMs}ms join=${tJoinMs}ms total=${tTotal}ms`);
   return state.player;
 }
 
@@ -203,8 +199,8 @@ async function playNext(guildId, client) {
   if (!next) {
     state.current = null;
     await updateVoiceChannelStatus(state, '');
-    await upsertController(guildId, state);
     armInactivity(state, () => disconnectGuild(guildId));
+    await upsertController(guildId, state);
     return;
   }
 
@@ -230,7 +226,7 @@ async function playNext(guildId, client) {
   });
 
   await updateVoiceChannelStatus(state, buildVoiceStatusText(state));
-  await upsertController(guildId, state);
+  await repostController(guildId, state);
 }
 
 async function replayCurrent(guildId) {
@@ -264,13 +260,21 @@ async function togglePause(guildId) {
   return state.paused;
 }
 
-async function toggleLoop(guildId) {
+// Cycles: Off → Track → Queue → Off
+async function toggleLoopMode(guildId) {
   const state = getState(guildId);
-  state.loopCurrent = !state.loopCurrent;
+  if (!state.loopCurrent && !state.loopQueue) {
+    state.loopCurrent = true;
+  } else if (state.loopCurrent) {
+    state.loopCurrent = false;
+    state.loopQueue = true;
+  } else {
+    state.loopQueue = false;
+  }
   if (state.client) {
     await upsertController(guildId, state);
   }
-  return state.loopCurrent;
+  return state.loopCurrent ? 'track' : state.loopQueue ? 'queue' : 'off';
 }
 
 /**
@@ -289,11 +293,10 @@ async function stopPlayback(guildId) {
   const state = getState(guildId);
   state.queue = [];
   state.loopCurrent = false;
+  state.loopQueue = false;
   if (state.player && state.current) {
     await state.player.stopTrack().catch(() => {});
-  }
-  if (state.client) {
-    await upsertController(guildId, state);
+    // UI is handled by onPlayerEnd → playNext (which updates to idle then deletes card)
   }
 }
 
@@ -353,6 +356,7 @@ async function disconnectGuild(guildId) {
   state.current = null;
   state.paused = false;
   state.loopCurrent = false;
+  state.loopQueue = false;
   state.voiceChannelId = null;
   state.client = null;
   state.textChannelId = null;
@@ -382,7 +386,7 @@ module.exports = {
   playNext,
   replayCurrent,
   togglePause,
-  toggleLoop,
+  toggleLoopMode,
   stopTrack,
   stopPlayback,
   clearQueue,

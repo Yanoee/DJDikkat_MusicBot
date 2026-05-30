@@ -16,6 +16,7 @@ const pkg = require('../package.json');
 const { handleInteraction, deployCommands } = require('./commands');
 const { getState } = require('./state');
 const { disconnectGuild } = require('./player');
+const { sendAnnouncement } = require('./announcement');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const required = [
@@ -101,6 +102,33 @@ client.once(Events.ClientReady, async () => {
       status: 'online'
     });
   }
+
+  await announceOnStartup(client);
+  setInterval(() => announceWeekly(client), 60 * 60 * 1000);
+});
+
+async function announceOnStartup(client) {
+  for (const guild of client.guilds.cache.values()) {
+    await announceIfNeeded(guild, client);
+  }
+}
+
+async function announceWeekly(client) {
+  for (const guild of client.guilds.cache.values()) {
+    await announceIfNeeded(guild, client);
+  }
+}
+
+async function announceIfNeeded(guild, client) {
+  try {
+    await sendAnnouncement(guild, client);
+  } catch (err) {
+    console.error(`Failed to announce in guild ${guild.id}:`, err);
+  }
+}
+
+client.on(Events.GuildCreate, async (guild) => {
+  await announceIfNeeded(guild, client);
 });
 
 // ---------------- INTERACTIONS ----------------

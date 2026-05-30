@@ -1,8 +1,8 @@
-﻿/************************************************************
+/************************************************************
  * DJ DIKKAT - Music Bot
  * Stats UI
- * Stats embed builder
- * Build 2.0.6
+ * Per-guild stats embed builder
+ * Build 2.1.0
  * Author: Yanoee
  ************************************************************/
 
@@ -29,28 +29,29 @@ function formatTopList(list, mapToLine) {
   return list.map(mapToLine).join('\n');
 }
 
-function pickRandomTitle(stats) {
-  const titles = Object.keys(stats.totals.songsByTitle || {});
+function pickRandomTitle(snap) {
+  const titles = Object.keys(snap.totals.songsByTitle || {});
   if (!titles.length) return '—';
-  const idx = Math.floor(Math.random() * titles.length);
-  return titles[idx];
+  return titles[Math.floor(Math.random() * titles.length)];
 }
 
-function buildStatsEmbed() {
-  const snap = getStatsSnapshot();
+function buildStatsEmbed(guildId) {
+  const snap = getStatsSnapshot(guildId);
 
   const topTitles = topFromMap(snap.totals.songsByTitle, 3);
-  const topUrls = topFromUrlMap(snap.totals.songsByUrl, 3);
-  const hasUrls = topUrls.length > 0;
+  const topUrls   = topFromUrlMap(snap.totals.songsByUrl, 3);
+  const hasUrls   = topUrls.length > 0;
   const topPeople = topUsers(snap.totals.users, 3);
 
-  const todayTop = topFromMap(snap.today.songsByTitle || {}, 1);
+  const todayTop  = topFromMap(snap.today.songsByTitle  || {}, 1);
   const weeklyTop = topFromMap(snap.weekly.songsByTitle || {}, 1);
   const honorable = pickRandomTitle(snap);
 
-  const topUrlMap = new Map(topUrls.map((u) => [u.title, u.key]));
-  const getUrlForTitle = (title) => topUrlMap.get(title) || null;
-  const getAnyUrlForTitle = (title) => {
+  const topUrlMap = new Map(topUrls.map(u => [u.title, u.key]));
+
+  const getUrlForTitle = title => topUrlMap.get(title) || null;
+
+  const getAnyUrlForTitle = title => {
     if (!title) return null;
     if (topUrlMap.has(title)) return topUrlMap.get(title);
     for (const [url, meta] of Object.entries(snap.totals.songsByUrl || {})) {
@@ -69,12 +70,12 @@ function buildStatsEmbed() {
       value: hasUrls
         ? formatTopList(topUrls, (x, i) => `${medal(i)} [${truncateTitle(x.title)}](${x.key}) — ${x.count}`)
         : formatTopList(topTitles, (x, i) => {
-          const url = getUrlForTitle(x.key);
-          const title = truncateTitle(x.key);
-          return url
-            ? `${medal(i)} [${title}](${url}) — ${x.count}`
-            : `${medal(i)} ${title} — ${x.count}`;
-        }),
+            const url   = getUrlForTitle(x.key);
+            const title = truncateTitle(x.key);
+            return url
+              ? `${medal(i)} [${title}](${url}) — ${x.count}`
+              : `${medal(i)} ${title} — ${x.count}`;
+          }),
       inline: false
     },
     {
@@ -86,12 +87,12 @@ function buildStatsEmbed() {
       name: '📅 Daily top (today)',
       value: todayTop.length
         ? (() => {
-          const title = truncateTitle(todayTop[0].key);
-          const url = getAnyUrlForTitle(todayTop[0].key);
-          return url
-            ? `⭐ [${title}](${url}) — ${todayTop[0].count}`
-            : `⭐ ${title} — ${todayTop[0].count}`;
-        })()
+            const title = truncateTitle(todayTop[0].key);
+            const url   = getAnyUrlForTitle(todayTop[0].key);
+            return url
+              ? `⭐ [${title}](${url}) — ${todayTop[0].count}`
+              : `⭐ ${title} — ${todayTop[0].count}`;
+          })()
         : '—',
       inline: false
     },
@@ -99,12 +100,12 @@ function buildStatsEmbed() {
       name: '📈 Weekly top (7d)',
       value: weeklyTop.length
         ? (() => {
-          const title = truncateTitle(weeklyTop[0].key);
-          const url = getUrlForTitle(weeklyTop[0].key);
-          return url
-            ? `⭐ [${title}](${url}) — ${weeklyTop[0].count}`
-            : `⭐ ${title} — ${weeklyTop[0].count}`;
-        })()
+            const title = truncateTitle(weeklyTop[0].key);
+            const url   = getUrlForTitle(weeklyTop[0].key);
+            return url
+              ? `⭐ [${title}](${url}) — ${weeklyTop[0].count}`
+              : `⭐ ${title} — ${weeklyTop[0].count}`;
+          })()
         : '—',
       inline: false
     },
@@ -112,7 +113,7 @@ function buildStatsEmbed() {
       name: '🏅 Honorable mention',
       value: (() => {
         const title = truncateTitle(honorable);
-        const url = getAnyUrlForTitle(honorable);
+        const url   = getAnyUrlForTitle(honorable);
         return url ? `[${title}](${url})` : title;
       })(),
       inline: false
@@ -122,13 +123,8 @@ function buildStatsEmbed() {
   return embed;
 }
 
-module.exports = {
-  buildStatsEmbed,
-  buildStatsChannelMessage
-};
-
 function buildStatsChannelMessage(guildId) {
-  const embed = buildStatsEmbed();
+  const embed = buildStatsEmbed(guildId);
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`statsremove:${guildId}`)
@@ -138,3 +134,8 @@ function buildStatsChannelMessage(guildId) {
   );
   return { embeds: [embed], components: [row] };
 }
+
+module.exports = {
+  buildStatsEmbed,
+  buildStatsChannelMessage
+};

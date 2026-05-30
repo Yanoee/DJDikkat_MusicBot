@@ -1,24 +1,27 @@
-﻿/************************************************************
+/************************************************************
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder
- * Build 2.0.7
+ * Build 2.1.0
  * Author: Yanoee
  ************************************************************/
 
-const os = require('os');
+const os   = require('os');
+const fs   = require('fs');
+const path = require('path');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getInactivityRemaining, getActiveVoiceCount } = require('./state');
+
+const LAST_UPDATE_FILE = path.join(__dirname, 'data', 'last-update.json');
+
+// ── Formatters ────────────────────────────────────────────
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0;
   let b = bytes;
-  while (b >= 1024 && i < units.length - 1) {
-    b /= 1024;
-    i += 1;
-  }
+  while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
   return `${b.toFixed(1)} ${units[i]}`;
 }
 
@@ -45,93 +48,173 @@ function formatMs(ms) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-let lastCpu = process.cpuUsage();
+function timeAgo(dateStr) {
+  if (!dateStr) return '—';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return '—';
+  const s = Math.floor(diff / 1000);
+  if (s < 60)  return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ${m % 60}m ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h ago`;
+}
+
+// ── CPU sampling ──────────────────────────────────────────
+
+let lastCpu     = process.cpuUsage();
 let lastCpuTime = Date.now();
 
 function averageCpuPercent() {
-  const now = Date.now();
+  const now       = Date.now();
   const elapsedMs = now - lastCpuTime;
   if (elapsedMs <= 0) return 0;
   const current = process.cpuUsage(lastCpu);
-  lastCpu = process.cpuUsage();
+  lastCpu     = process.cpuUsage();
   lastCpuTime = now;
-
   const usedMs = (current.user + current.system) / 1000;
-  const cores = os.cpus().length || 1;
-  const pct = (usedMs / (elapsedMs * cores)) * 100;
+  const cores  = os.cpus().length || 1;
+  const pct    = (usedMs / (elapsedMs * cores)) * 100;
   return Number.isFinite(pct) ? pct : 0;
 }
 
-function buildHealthEmbed(client, state, meta, node) {
-  const nodeStats = node && node.stats ? node.stats : null;
-  const status = state.current
-    ? (state.paused ? 'Paused' : 'Playing')
-    : 'Idle';
+// ── External service checks ───────────────────────────────
 
-  const inactivity = getInactivityRemaining(state);
-  const inactivityText = inactivity ? formatMs(inactivity) : '—';
+async function pingYtCipher() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch('http://127.0.0.1:8001', {
+      signal: controller.signal
+    }).finally(() => clearTimeout(timer));
+    return (res.ok || res.status < 500) ? '🟢 Online' : `🟡 HTTP ${res.status}`;
+  } catch {
+    return '🔴 Offline';
+  }
+}
+
+function loadLastUpdate() {
+  try {
+    if (!fs.existsSync(LAST_UPDATE_FILE)) return null;
+    const data = JSON.parse(fs.readFileSync(LAST_UPDATE_FILE, 'utf8'));
+    return data && data.timestamp ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatLastUpdate(update) {
+  if (!update) return '*No update record found.*\nRun update-all.sh at least once.';
+
+  const icon       = update.status === 'success' ? '✅' : '❌';
+  const statusText = update.status === 'success'
+    ? 'Success'
+    : `Failed at: **${update.failedAt || 'unknown'}**`;
+  const when = timeAgo(update.timestamp);
+
+  const lines = [`${icon} ${statusText} • ${when}`];
+
+  if (update.lavalink) {
+    lines.push(`🎚️ Lavalink  ${update.lavalink.updated ? '🔄 updated' : '✔️ no change'}`);
+  }
+
+  if (update.ytcipher) {
+    const yc  = update.ytcipher;
+    const msg = yc.message ? ` — ${String(yc.message).slice(0, 60)}` : '';
+    lines.push(`🔧 yt-cipher  ${yc.updated ? `🔄 \`${yc.commit || '?'}\`${msg}` : '✔️ no change'}`);
+  }
+
+  return lines.join('\n');
+}
+
+// ── Embed builder (async — pings yt-cipher) ───────────────
+
+async function buildHealthEmbed(client, state, meta, node) {
+  const nodeStats = node?.stats ?? null;
+
+  const status = state.current
+    ? (state.paused ? '⏸️ Paused' : '▶️ Playing')
+    : '💤 Idle';
+
+  const inactivityText = (() => {
+    const rem = getInactivityRemaining(state);
+    return rem ? formatMs(rem) : '—';
+  })();
+
+  const [ytCipherStatus, lastUpdate] = await Promise.all([
+    pingYtCipher(),
+    Promise.resolve(loadLastUpdate())
+  ]);
 
   const embed = new EmbedBuilder()
     .setTitle('🩺 DJ DIKKAT Health')
-    .setColor(0x2b6cb0);
+    .setColor(0x2b6cb0)
+    .setTimestamp();
 
+  // ── Bot ──────────────────────────────────────────────────
   embed.addFields(
-    { name: '📡 Discord Ping', value: `${Math.round(client.ws.ping)}ms`, inline: true },
-    { name: '🎧 Voice Sessions', value: `${getActiveVoiceCount()}`, inline: true },
-    { name: '🎵 Status', value: status, inline: true },
-    { name: '🧠 CPU', value: `${averageCpuPercent().toFixed(1)}%`, inline: true },
-    { name: '💾 RAM', value: `${formatBytes(process.memoryUsage().rss)} / ${formatBytes(os.totalmem())}`, inline: true },
-    { name: '🕒 Uptime', value: formatUptime(process.uptime()), inline: true }
+    { name: '📡 Discord Ping',   value: `${Math.round(client.ws.ping)}ms`,                                   inline: true },
+    { name: '🎧 Voice Sessions', value: `${getActiveVoiceCount()}`,                                           inline: true },
+    { name: '🎵 Status',         value: status,                                                               inline: true },
+    { name: '🧠 CPU',            value: `${averageCpuPercent().toFixed(1)}%`,                                 inline: true },
+    { name: '💾 RAM',            value: `${formatBytes(process.memoryUsage().rss)} / ${formatBytes(os.totalmem())}`, inline: true },
+    { name: '🕒 Uptime',         value: formatUptime(process.uptime()),                                       inline: true }
   );
 
-  const nodeState = node ? (node.state === 2 ? 'Connected' : 'Reconnecting') : 'Unavailable';
-  const nodePing = nodeStats && Number.isFinite(nodeStats.ping) ? `${nodeStats.ping}ms` : '—';
-  const nodePlayers = nodeStats && Number.isFinite(nodeStats.players) ? `${nodeStats.players}` : '—';
-  const nodeCpu = nodeStats && nodeStats.cpu && Number.isFinite(nodeStats.cpu.systemLoad)
-    ? `${(nodeStats.cpu.systemLoad * 100).toFixed(1)}%`
-    : '—';
-  const nodeMem = nodeStats && nodeStats.memory && Number.isFinite(nodeStats.memory.used)
-    ? formatBytes(nodeStats.memory.used)
-    : '—';
-  const nodeFrames = nodeStats && nodeStats.frameStats
-    ? `deficit ${nodeStats.frameStats.deficit} / nulled ${nodeStats.frameStats.nulled}`
-    : '—';
+  // ── Lavalink ──────────────────────────────────────────────
+  const nodeState   = node
+    ? (node.state === 2 ? '🟢 Connected' : '🟡 Reconnecting')
+    : '🔴 Unavailable';
+  const nodePing    = nodeStats && Number.isFinite(nodeStats.ping)
+    ? `${nodeStats.ping}ms` : '—';
+  const nodePlayers = nodeStats && Number.isFinite(nodeStats.players)
+    ? `${nodeStats.players}` : '—';
+  const nodeCpu     = nodeStats?.cpu && Number.isFinite(nodeStats.cpu.systemLoad)
+    ? `${(nodeStats.cpu.systemLoad * 100).toFixed(1)}%` : '—';
+  const nodeMem     = nodeStats?.memory && Number.isFinite(nodeStats.memory.used)
+    ? formatBytes(nodeStats.memory.used) : '—';
+  const nodeFrames  = nodeStats?.frameStats
+    ? `deficit ${nodeStats.frameStats.deficit} / nulled ${nodeStats.frameStats.nulled}` : '—';
 
   embed.addFields(
-    { name: '🎚️ Lavalink Status', value: nodeState, inline: true },
-    { name: '📡 Lavalink Ping', value: nodePing, inline: true },
-    { name: '🎶 Players', value: nodePlayers, inline: true },
-    { name: '🔥 Lavalink CPU', value: nodeCpu, inline: true },
-    { name: '💾 Lavalink Memory', value: nodeMem, inline: true },
-    { name: '⚠️ Frame Stats', value: nodeFrames, inline: true }
+    { name: '🎚️ Lavalink',     value: nodeState,   inline: true },
+    { name: '📡 LL Ping',       value: nodePing,    inline: true },
+    { name: '🎶 LL Players',    value: nodePlayers, inline: true },
+    { name: '🔥 LL CPU',        value: nodeCpu,     inline: true },
+    { name: '💾 LL Memory',     value: nodeMem,     inline: true },
+    { name: '⚠️ Frame Stats',   value: nodeFrames,  inline: true }
   );
 
+  // ── Playback ──────────────────────────────────────────────
   embed.addFields(
-    { name: '📜 Queue', value: `${state.queue.length} tracks`, inline: true },
-    { name: '⏭️ Tracks since boot', value: `${meta.tracksSinceBoot}`, inline: true },
-    { name: '💤 Inactivity left', value: inactivityText, inline: true }
+    { name: '📜 Queue',           value: `${state.queue.length} tracks`, inline: true },
+    { name: '⏭️ Tracks / boot',  value: `${meta.tracksSinceBoot}`,      inline: true },
+    { name: '💤 Inactivity left', value: inactivityText,                 inline: true }
   );
 
-  if (meta.lastWriteTime) {
-    embed.addFields({ name: '🧾 Stats last write', value: meta.lastWriteTime.toISOString(), inline: false });
-  }
+  // ── Services ──────────────────────────────────────────────
+  embed.addFields(
+    { name: '🔧 yt-cipher',    value: ytCipherStatus,                                                              inline: true },
+    { name: '🧾 Stats written', value: meta.lastWriteTime ? timeAgo(meta.lastWriteTime.toISOString()) : '—',        inline: true },
+    { name: '🔥 Load Average',  value: os.loadavg().map(v => v.toFixed(2)).join(' / '),                             inline: true }
+  );
 
+  // ── Last Update ────────────────────────────────────────────
   embed.addFields({
-    name: '🔥 Load Average',
-    value: os.loadavg().map(v => v.toFixed(2)).join(' / '),
+    name:   '🔄 Last Update',
+    value:  formatLastUpdate(lastUpdate),
     inline: false
   });
 
   return embed;
 }
 
-module.exports = {
-  buildHealthEmbed,
-  buildHealthMessage
-};
+// ── Message builder ───────────────────────────────────────
 
-function buildHealthMessage(client, state, meta, node, userId, guildId) {
-  const embed = buildHealthEmbed(client, state, meta, node);
+async function buildHealthMessage(client, state, meta, node, userId, guildId) {
+  const embed = await buildHealthEmbed(client, state, meta, node);
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`dmremove:health:${userId}`)
@@ -147,8 +230,7 @@ function buildHealthMessage(client, state, meta, node, userId, guildId) {
       .setCustomId(`memreset:history:${guildId}:${userId}`)
       .setLabel('Reset History')
       .setEmoji('🧹')
-      .setStyle(ButtonStyle.Danger)
-    ,
+      .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId(`memreset:messages:${guildId}:${userId}`)
       .setLabel('Reset Messages')
@@ -157,3 +239,7 @@ function buildHealthMessage(client, state, meta, node, userId, guildId) {
   );
   return { embeds: [embed], components: [row] };
 }
+
+// ── Exports ───────────────────────────────────────────────
+
+module.exports = { buildHealthMessage };

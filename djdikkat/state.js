@@ -21,6 +21,7 @@ function getState(guildId) {
       queue: [],
       current: null,
       paused: false,
+      loopCurrent: false,
 
       // UI / VC
       voiceChannelId: null,

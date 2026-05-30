@@ -1,41 +1,57 @@
-﻿/************************************************************
+/************************************************************
  * DJ DIKKAT - Music Bot
  * Stats engine
- * JSON-backed play counters and rollups
- * Build 2.0.7
+ * Per-guild JSON-backed play counters and rollups
+ * Build 2.1.0
  * Author: Yanoee
+ *
+ * File layout:
+ *   data/guilds/<guildId>/stats.json — play counts for this guild only
+ *
+ * Each guild's stats are fully isolated.
  ************************************************************/
 
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
-const fsp = fs.promises;
+const fsp  = fs.promises;
 
-const DATA_DIR = path.join(__dirname, 'data');
-const STATS_PATH = path.join(DATA_DIR, 'stats.json');
-const MAX_DAYS = 30;
-const WRITE_DEBOUNCE_MS = 250;
+const DATA_DIR       = path.join(__dirname, 'data');
+const MAX_DAYS       = 30;
+const WRITE_DEBOUNCE = 250; // ms
+
+// Global boot counter (all guilds combined, resets on restart)
 let tracksSinceBoot = 0;
-let lastWriteTime = null;
-let statsCache = null;
-let statsWriteTimer = null;
-let statsWriteInFlight = Promise.resolve();
+let lastWriteTime   = null;
+
+// ── Per-guild caches and timers ───────────────────────────
+const statsCache    = new Map(); // guildId -> statsData
+const statsTimers   = new Map(); // guildId -> timer handle
+const statsInFlight = new Map(); // guildId -> Promise
+
+// ── Path helpers ──────────────────────────────────────────
+
+function guildDir(guildId) {
+  return path.join(DATA_DIR, 'guilds', guildId);
+}
+
+function statsFile(guildId) {
+  return path.join(guildDir(guildId), 'stats.json');
+}
+
+// ── Date key helpers ──────────────────────────────────────
 
 function todayKey() {
   const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function daysAgoKey(daysAgo) {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+// ── Empty template ────────────────────────────────────────
 
 function emptyStats() {
   return {
@@ -49,53 +65,83 @@ function emptyStats() {
   };
 }
 
-function loadStats() {
-  if (statsCache) return statsCache;
+// ── Loader (sync on first call, then cached) ──────────────
+
+function loadStats(guildId) {
+  if (statsCache.has(guildId)) return statsCache.get(guildId);
+  let data = emptyStats();
   try {
-    if (!fs.existsSync(STATS_PATH)) {
-      statsCache = emptyStats();
-      return statsCache;
+    const file = statsFile(guildId);
+    if (fs.existsSync(file)) {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (parsed && parsed.totals && parsed.daily) data = parsed;
     }
-    const raw = fs.readFileSync(STATS_PATH, 'utf8');
-    const data = JSON.parse(raw);
-    statsCache = data && data.totals && data.daily ? data : emptyStats();
-    return statsCache;
-  } catch {
-    statsCache = emptyStats();
-    return statsCache;
-  }
+  } catch {}
+  statsCache.set(guildId, data);
+  return data;
 }
 
-function scheduleStatsWrite() {
-  if (statsWriteTimer) return;
-  statsWriteTimer = setTimeout(() => {
-    statsWriteTimer = null;
-    const snapshot = statsCache || emptyStats();
-    statsWriteInFlight = statsWriteInFlight.then(async () => {
-      await fsp.mkdir(DATA_DIR, { recursive: true });
-      await fsp.writeFile(STATS_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
+// ── Debounced writer ──────────────────────────────────────
+
+function scheduleStatsWrite(guildId) {
+  if (statsTimers.has(guildId)) return;
+  statsTimers.set(guildId, setTimeout(() => {
+    statsTimers.delete(guildId);
+    const snapshot = statsCache.get(guildId) || emptyStats();
+    const prev = statsInFlight.get(guildId) ?? Promise.resolve();
+    const next = prev.then(async () => {
+      await fsp.mkdir(guildDir(guildId), { recursive: true });
+      await fsp.writeFile(statsFile(guildId), JSON.stringify(snapshot, null, 2), 'utf8');
       lastWriteTime = new Date();
-    }).catch(() => {});
-  }, WRITE_DEBOUNCE_MS);
+    }).catch((err) => {
+      console.error(`Failed to write stats file for guild ${guildId}:`, err);
+    });
+    statsInFlight.set(guildId, next);
+  }, WRITE_DEBOUNCE));
 }
+
+// ── Internal helpers ──────────────────────────────────────
 
 function increment(map, key, by = 1) {
   if (!key) return;
   map[key] = (map[key] || 0) + by;
 }
 
-async function recordPlay({ title, uri, userId, userTag }) {
+function buildWeeklyRollup(stats) {
+  const songsByTitle = {};
+  const songsByUrl   = {};
+  const users        = {};
+  let plays          = 0;
+
+  for (let i = 0; i < 7; i++) {
+    const day = stats.daily[daysAgoKey(i)];
+    if (!day) continue;
+    plays += day.plays || 0;
+    Object.entries(day.songsByTitle || {}).forEach(([t, c]) => increment(songsByTitle, t, c));
+    Object.entries(day.songsByUrl   || {}).forEach(([u, v]) => {
+      if (!songsByUrl[u]) songsByUrl[u] = { count: 0, title: v.title || u };
+      songsByUrl[u].count += v.count || 0;
+    });
+    Object.entries(day.users || {}).forEach(([id, v]) => {
+      if (!users[id]) users[id] = { count: 0, tag: v.tag || id };
+      users[id].count += v.count || 0;
+    });
+  }
+
+  return { songsByTitle, songsByUrl, users, plays };
+}
+
+// ── Public API ────────────────────────────────────────────
+
+async function recordPlay(guildId, { title, uri, userId, userTag }) {
+  if (!guildId) return;
   tracksSinceBoot += 1;
-  const stats = loadStats();
-  const day = todayKey();
+
+  const stats = loadStats(guildId);
+  const day   = todayKey();
 
   if (!stats.daily[day]) {
-    stats.daily[day] = {
-      songsByTitle: {},
-      songsByUrl: {},
-      users: {},
-      plays: 0
-    };
+    stats.daily[day] = { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
   }
 
   const daily = stats.daily[day];
@@ -103,15 +149,11 @@ async function recordPlay({ title, uri, userId, userTag }) {
   // totals
   if (title) increment(stats.totals.songsByTitle, title, 1);
   if (uri) {
-    if (!stats.totals.songsByUrl[uri]) {
-      stats.totals.songsByUrl[uri] = { count: 0, title: title || uri };
-    }
+    if (!stats.totals.songsByUrl[uri]) stats.totals.songsByUrl[uri] = { count: 0, title: title || uri };
     stats.totals.songsByUrl[uri].count += 1;
   }
   if (userId) {
-    if (!stats.totals.users[userId]) {
-      stats.totals.users[userId] = { count: 0, tag: userTag || userId };
-    }
+    if (!stats.totals.users[userId]) stats.totals.users[userId] = { count: 0, tag: userTag || userId };
     stats.totals.users[userId].count += 1;
   }
 
@@ -119,29 +161,37 @@ async function recordPlay({ title, uri, userId, userTag }) {
   daily.plays += 1;
   if (title) increment(daily.songsByTitle, title, 1);
   if (uri) {
-    if (!daily.songsByUrl[uri]) {
-      daily.songsByUrl[uri] = { count: 0, title: title || uri };
-    }
+    if (!daily.songsByUrl[uri]) daily.songsByUrl[uri] = { count: 0, title: title || uri };
     daily.songsByUrl[uri].count += 1;
   }
   if (userId) {
-    if (!daily.users[userId]) {
-      daily.users[userId] = { count: 0, tag: userTag || userId };
-    }
+    if (!daily.users[userId]) daily.users[userId] = { count: 0, tag: userTag || userId };
     daily.users[userId].count += 1;
   }
 
-  // prune old days
+  // prune days older than MAX_DAYS
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - MAX_DAYS);
-  Object.keys(stats.daily).forEach((k) => {
+  for (const k of Object.keys(stats.daily)) {
     const [y, m, d] = k.split('-').map(Number);
-    const kd = new Date(y, (m - 1), d);
-    if (kd < cutoff) delete stats.daily[k];
-  });
+    if (new Date(y, m - 1, d) < cutoff) delete stats.daily[k];
+  }
 
-  scheduleStatsWrite();
+  scheduleStatsWrite(guildId);
 }
+
+function getStatsSnapshot(guildId) {
+  const stats  = loadStats(guildId);
+  const today  = stats.daily[todayKey()] || { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
+  const weekly = buildWeeklyRollup(stats);
+  return { totals: stats.totals, today, weekly };
+}
+
+function getStatsMeta() {
+  return { tracksSinceBoot, lastWriteTime };
+}
+
+// ── Ranking helpers (used by stats_ui.js) ─────────────────
 
 function topFromMap(map, limit = 3) {
   return Object.entries(map)
@@ -164,54 +214,13 @@ function topUsers(map, limit = 3) {
     .slice(0, limit);
 }
 
-function buildWeeklyRollup(stats) {
-  const songsByTitle = {};
-  const songsByUrl = {};
-  const users = {};
-  let plays = 0;
-
-  for (let i = 0; i < 7; i++) {
-    const key = daysAgoKey(i);
-    const day = stats.daily[key];
-    if (!day) continue;
-    plays += day.plays || 0;
-    Object.entries(day.songsByTitle || {}).forEach(([t, c]) => increment(songsByTitle, t, c));
-    Object.entries(day.songsByUrl || {}).forEach(([u, v]) => {
-      if (!songsByUrl[u]) songsByUrl[u] = { count: 0, title: v.title || u };
-      songsByUrl[u].count += v.count || 0;
-    });
-    Object.entries(day.users || {}).forEach(([id, v]) => {
-      if (!users[id]) users[id] = { count: 0, tag: v.tag || id };
-      users[id].count += v.count || 0;
-    });
-  }
-
-  return { songsByTitle, songsByUrl, users, plays };
-}
-
-function getStatsSnapshot() {
-  const stats = loadStats();
-  const today = stats.daily[todayKey()] || { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
-  const weekly = buildWeeklyRollup(stats);
-  return {
-    totals: stats.totals,
-    today,
-    weekly
-  };
-}
-
-function getStatsMeta() {
-  return {
-    tracksSinceBoot,
-    lastWriteTime
-  };
-}
+// ── Exports ───────────────────────────────────────────────
 
 module.exports = {
   recordPlay,
   getStatsSnapshot,
+  getStatsMeta,
   topFromMap,
   topFromUrlMap,
-  topUsers,
-  getStatsMeta
+  topUsers
 };

@@ -23,22 +23,9 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
 async function updateVoiceChannelStatus(state, text) {
-  if (!DISCORD_TOKEN) return;
-  if (!state.voiceChannelId) return;
-
-  const status = text == null ? '' : String(text);
-  const body = {
-    status: status.length > 500 ? `${status.slice(0, 497)}...` : status
-  };
-
-  await fetch(`${DISCORD_API_BASE}/channels/${state.voiceChannelId}/voice-status`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bot ${DISCORD_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  }).catch(() => {});
+  // Discord does not expose a public REST endpoint to set voice channel status.
+  // This function is intentionally a no-op to avoid unnecessary failed requests.
+  return;
 }
 
 function buildVoiceStatusText(state) {
@@ -107,7 +94,8 @@ async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
  * Ensure player exists and is connected
  */
 async function ensurePlayer(interaction) {
-  const state = getState(interaction.guildId);
+  const guildId = interaction.guildId;
+  const state = getState(guildId);
   const t0 = Date.now();
   if (state.player) {
     if (state.playerListenerTarget !== state.player && state.onPlayerEnd) {
@@ -144,7 +132,7 @@ async function ensurePlayer(interaction) {
   const tJoinStart = Date.now();
   try {
     state.player = await interaction.client.shoukaku.joinVoiceChannel({
-      guildId: interaction.guildId,
+      guildId,
       channelId: state.voiceChannelId,
       shardId: interaction.guild.shardId ?? 0,
       deaf: true
@@ -152,9 +140,9 @@ async function ensurePlayer(interaction) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('existing connection') && interaction.client?.shoukaku?.leaveVoiceChannel) {
-      await interaction.client.shoukaku.leaveVoiceChannel(interaction.guildId).catch(() => {});
+      await interaction.client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
       state.player = await interaction.client.shoukaku.joinVoiceChannel({
-        guildId: interaction.guildId,
+        guildId,
         channelId: state.voiceChannelId,
         shardId: interaction.guild.shardId ?? 0,
         deaf: true
@@ -171,17 +159,26 @@ async function ensurePlayer(interaction) {
       const previous = state.current;
       const reason = normalizeEndReason(endEvent);
       if (reason) {
-        console.log(`Track ended in guild ${interaction.guildId} with reason: ${reason}`);
+        console.log(`Track ended in guild ${guildId} with reason: ${reason}`);
+      }
+      if (isCleanupLikeEnd(endEvent)) {
+        state.current = null;
+        state.paused = false;
+        // Keep queue intact on websocket/voice cleanup so tracks are not drained.
+        if (previous) state.queue.unshift(previous);
+        await upsertController(guildId, state);
+        return;
+      }
+      const canLoop = reason === '' || reason === 'FINISHED';
+      if (state.loopCurrent && previous && canLoop) {
+        state.current = previous;
+        state.paused = false;
+        const replayed = await replayCurrent(guildId);
+        if (replayed) return;
       }
       state.current = null;
       state.paused = false;
-      if (isCleanupLikeEnd(endEvent)) {
-        // Keep queue intact on websocket/voice cleanup so tracks are not drained.
-        if (previous) state.queue.unshift(previous);
-        await upsertController(interaction.guildId, state);
-        return;
-      }
-      await playNext(interaction.guildId, interaction.client);
+      await playNext(guildId, state.client);
     };
   }
 
@@ -214,7 +211,7 @@ async function playNext(guildId, client) {
   state.current = next;
   state.paused = false;
 
-  await recordPlay({
+  await recordPlay(guildId, {
     title: next.info?.title,
     uri: next.info?.uri,
     userId: next.requesterId,
@@ -227,12 +224,30 @@ async function playNext(guildId, client) {
     userTag: next.requesterTag
   });
 
+  if (!state.player) return;
   await state.player.playTrack({
     track: { encoded: next.encoded }
   });
 
   await updateVoiceChannelStatus(state, buildVoiceStatusText(state));
   await upsertController(guildId, state);
+}
+
+async function replayCurrent(guildId) {
+  const state = getState(guildId);
+  if (!state.player || !state.current) return false;
+  if (state.disconnecting) return false;
+
+  clearInactivity(state);
+  state.paused = false;
+
+  await state.player.playTrack({
+    track: { encoded: state.current.encoded }
+  });
+
+  await updateVoiceChannelStatus(state, buildVoiceStatusText(state));
+  await upsertController(guildId, state);
+  return true;
 }
 
 /**
@@ -247,6 +262,15 @@ async function togglePause(guildId) {
   await updateVoiceChannelStatus(state, buildVoiceStatusText(state));
   await upsertController(guildId, state);
   return state.paused;
+}
+
+async function toggleLoop(guildId) {
+  const state = getState(guildId);
+  state.loopCurrent = !state.loopCurrent;
+  if (state.client) {
+    await upsertController(guildId, state);
+  }
+  return state.loopCurrent;
 }
 
 /**
@@ -264,6 +288,7 @@ async function stopTrack(guildId) {
 async function stopPlayback(guildId) {
   const state = getState(guildId);
   state.queue = [];
+  state.loopCurrent = false;
   if (state.player && state.current) {
     await state.player.stopTrack().catch(() => {});
   }
@@ -319,18 +344,21 @@ async function disconnectGuild(guildId) {
     await state.client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
   }
 
+  const savedClient = state.client;
+
   state.player = null;
   state.playerListenerTarget = null;
   state.onPlayerEnd = null;
   state.queue = [];
   state.current = null;
   state.paused = false;
+  state.loopCurrent = false;
   state.voiceChannelId = null;
   state.client = null;
   state.textChannelId = null;
   state.disconnecting = false;
 
-  await removeController(guildId, state.client);
+  await removeController(guildId, savedClient);
   clearState(guildId);
 }
 
@@ -352,7 +380,9 @@ module.exports = {
   pickNode,
   ensurePlayer,
   playNext,
+  replayCurrent,
   togglePause,
+  toggleLoop,
   stopTrack,
   stopPlayback,
   clearQueue,

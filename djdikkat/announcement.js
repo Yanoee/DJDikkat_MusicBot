@@ -68,6 +68,39 @@ function announcementDue(settings) {
   return Date.now() - last >= ANNOUNCEMENT_INTERVAL_MS;
 }
 
+async function sendCustomToAll(client, payload) {
+  const { title, message, color, footer } = payload;
+  let sent = 0;
+  let failed = 0;
+  const total = client.guilds.cache.size;
+
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      const memory   = getGuildMemory(guild.id);
+      const settings = memory?.settings || {};
+      const channel  = findAnnouncementChannel(guild, settings);
+      if (!channel) { failed++; continue; }
+
+      const embed = new EmbedBuilder()
+        .setTitle(title?.trim() || '📢 Announcement')
+        .setColor(typeof color === 'number' ? color : 0x2b6cb0)
+        .setDescription(message.trim())
+        .setTimestamp();
+
+      if (footer?.trim()) {
+        embed.setFooter({ text: footer.trim() });
+      }
+
+      const msg = await channel.send({ embeds: [embed] }).catch(() => null);
+      if (msg) sent++; else failed++;
+    } catch {
+      failed++;
+    }
+  }
+
+  return { sent, failed, total };
+}
+
 async function sendAnnouncement(guild, client, preferredChannelId = null) {
   if (!guild || !client) return false;
 
@@ -99,5 +132,6 @@ async function sendAnnouncement(guild, client, preferredChannelId = null) {
 }
 
 module.exports = {
-  sendAnnouncement
+  sendAnnouncement,
+  sendCustomToAll
 };

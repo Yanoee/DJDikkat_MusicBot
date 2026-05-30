@@ -17,6 +17,7 @@ const { handleInteraction, deployCommands } = require('./commands');
 const { getState } = require('./state');
 const { disconnectGuild } = require('./player');
 const { sendAnnouncement } = require('./announcement');
+const { startInternalServer } = require('./internal-server');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const required = [
@@ -105,6 +106,9 @@ client.once(Events.ClientReady, async () => {
 
   await announceOnStartup(client);
   setInterval(() => announceWeekly(client), 60 * 60 * 1000);
+
+  const internalPort = parseInt(process.env.BOT_INTERNAL_PORT || '3001', 10);
+  startInternalServer(client, internalPort);
 });
 
 async function announceOnStartup(client) {

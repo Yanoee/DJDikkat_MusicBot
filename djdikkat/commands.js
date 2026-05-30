@@ -749,6 +749,12 @@ async function handleInteraction(interaction) {
         return interaction.followUp({ content: '⏮️ Replaying last track!', flags: MessageFlags.Ephemeral });
       }
 
+      if (action === 'disconnect') {
+        await interaction.followUp({ content: '🔌 Disconnecting…', flags: MessageFlags.Ephemeral });
+        await disconnectGuild(guildId);
+        return;
+      }
+
       if (action === 'stop') {
         await stopPlayback(guildId);
         return interaction.followUp({ content: '⏹️ Stopped playback', flags: MessageFlags.Ephemeral });

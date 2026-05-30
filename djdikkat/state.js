@@ -9,7 +9,7 @@ const guildState = new Map();
 
 // timings (same as old code)
 const COOLDOWN_MS = 5000;
-const INACTIVITY_MS = 10 * 60 * 1000;
+const INACTIVITY_MS = 5 * 60 * 1000;
 
 /**
  * Get or create guild state
@@ -22,6 +22,7 @@ function getState(guildId) {
       current: null,
       paused: false,
       loopCurrent: false,
+      loopQueue: false,
 
       // UI / VC
       voiceChannelId: null,
@@ -44,7 +45,10 @@ function getState(guildId) {
       buttonCooldowns: new Map(),
 
       // idle UI refresh
-      idleUiTimer: null
+      idleUiTimer: null,
+
+      // last played track for idle card
+      lastPlayed: null
     });
   }
   return guildState.get(guildId);

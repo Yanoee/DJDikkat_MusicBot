@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 2.0.7
+ * Build 3.0.0
  * Author: Yanoee
  ************************************************************/
 
@@ -33,7 +33,7 @@ const {
   ensurePlayer,
   playNext,
   togglePause,
-  toggleLoop,
+  toggleLoopMode,
   stopTrack,
   stopPlayback,
   clearQueue,
@@ -349,6 +349,15 @@ async function handleInteraction(interaction) {
 
         if (!tracks.length) {
           return interaction.editReply('❌ No results found');
+        }
+
+        const MAX_QUEUE = 5;
+        const available = Math.max(0, MAX_QUEUE - state.queue.length);
+        if (available === 0) {
+          return interaction.editReply(`❌ Queue is full (${MAX_QUEUE} tracks max). Skip or clear some tracks first.`);
+        }
+        if (tracks.length > available) {
+          tracks = tracks.slice(0, available);
         }
 
         tracks.forEach(t => {
@@ -696,11 +705,48 @@ async function handleInteraction(interaction) {
         if (!state.current) {
           return interaction.followUp({ content: '🔇 Nothing is playing', flags: MessageFlags.Ephemeral });
         }
-        const enabled = await toggleLoop(guildId);
-        return interaction.followUp({
-          content: enabled ? '🔁 Loop mode enabled' : '➡️ Loop mode disabled',
-          flags: MessageFlags.Ephemeral
-        });
+        const mode = await toggleLoopMode(guildId);
+        const modeText = mode === 'track' ? '🔂 Loop: Track' : mode === 'queue' ? '🔁 Loop: Queue' : '➡️ Loop: Off';
+        return interaction.followUp({ content: modeText, flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === 'shuffle') {
+        state.textChannelId = interaction.channelId;
+        if (!state.queue.length) {
+          return interaction.followUp({ content: '📭 Queue is empty', flags: MessageFlags.Ephemeral });
+        }
+        for (let i = state.queue.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]];
+        }
+        await upsertController(guildId, state);
+        return interaction.followUp({ content: '🔀 Queue shuffled', flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === 'replay') {
+        state.textChannelId = interaction.channelId;
+        if (!state.lastPlayed?.uri && !state.lastPlayed?.title) {
+          return interaction.followUp({ content: '❌ Nothing to replay', flags: MessageFlags.Ephemeral });
+        }
+        try { await ensurePlayer(interaction); } catch (err) {
+          return interaction.followUp({ content: `❌ ${err.message}`, flags: MessageFlags.Ephemeral });
+        }
+        const node = pickNode(interaction.client);
+        if (!node) return interaction.followUp({ content: '❌ Lavalink not available', flags: MessageFlags.Ephemeral });
+        const identifier = state.lastPlayed.uri || `ytsearch:${state.lastPlayed.title}`;
+        const result = await loadTracks(node, identifier);
+        const tracks = extractTracks(result?.data ?? result);
+        const track = tracks[0];
+        if (!track) return interaction.followUp({ content: '❌ Could not find that track', flags: MessageFlags.Ephemeral });
+        track.requesterTag = interaction.user.tag;
+        track.requesterId = interaction.user.id;
+        state.queue.unshift(track);
+        if (!state.current) {
+          await playNext(guildId, interaction.client);
+        } else {
+          await upsertController(guildId, state);
+        }
+        return interaction.followUp({ content: '⏮️ Replaying last track!', flags: MessageFlags.Ephemeral });
       }
 
       if (action === 'stop') {

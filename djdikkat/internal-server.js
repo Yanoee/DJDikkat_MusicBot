@@ -36,6 +36,17 @@ function startInternalServer(client, port = 3001) {
       return;
     }
 
+    if (req.method === 'GET' && req.url === '/guilds') {
+      const guilds = [...client.guilds.cache.values()].map(g => ({
+        id:          g.id,
+        name:        g.name,
+        memberCount: g.memberCount,
+        icon:        g.iconURL({ size: 64 }) || null,
+        joinedAt:    g.joinedAt ? g.joinedAt.toISOString() : null
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      return send(200, { guilds, total: guilds.length });
+    }
+
     send(404, { error: 'Not found' });
   });
 

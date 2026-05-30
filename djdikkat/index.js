@@ -9,14 +9,17 @@ const path = require('path');
 // Always load the bot's .env regardless of current working directory.
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+// Logger must be required before anything else so the console patch applies globally.
+const { startHeartbeat } = require('./logger');
+
 const { Client, GatewayIntentBits, Events, ActivityType } = require('discord.js');
 const { Shoukaku, Connectors } = require('shoukaku');
 const pkg = require('../package.json');
 
 const { handleInteraction, deployCommands } = require('./commands');
-const { getState } = require('./state');
+const { getState, getActiveVoiceCount } = require('./state');
 const { disconnectGuild } = require('./player');
-const { sendAnnouncement } = require('./announcement');
+const { sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { startInternalServer } = require('./internal-server');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
@@ -89,13 +92,13 @@ client.on('warn', (info) => {
 // ---------------- READY ----------------
 
 client.once(Events.ClientReady, async () => {
-  console.log('🚀 Starting Dj Dikkat');
+  console.log(`🚀 Starting DJ DIKKAT  v${pkg.version}`);
   console.log(`✅ Logged in as ${client.user.tag}`);
   console.log(`🏠 Guilds: ${client.guilds.cache.size}`);
   if (process.env.DEPLOY_COMMANDS === 'true') {
     await deployCommands(client);
   } else {
-    console.log('ℹ️ DEPLOY_COMMANDS not set to true — skipping command deploy');
+    console.log('ℹ️  Command deploy skipped');
   }
   if (client.user) {
     client.user.setPresence({
@@ -109,6 +112,8 @@ client.once(Events.ClientReady, async () => {
 
   const internalPort = parseInt(process.env.BOT_INTERNAL_PORT || '3001', 10);
   startInternalServer(client, internalPort);
+
+  startHeartbeat(client, getActiveVoiceCount);
 });
 
 async function announceOnStartup(client) {
@@ -132,6 +137,7 @@ async function announceIfNeeded(guild, client) {
 }
 
 client.on(Events.GuildCreate, async (guild) => {
+  await sendOwnerWelcome(guild, client);
   await announceIfNeeded(guild, client);
 });
 

@@ -139,6 +139,48 @@ function startInternalServer(client, port = 3001) {
           return send(200, { ok: true });
         }
 
+        if (req.method === 'POST' && sub === '/nuke-messages') {
+          await resetGuildMessages(guildId);
+
+          const guild = client.guilds.cache.get(guildId);
+          let deleted = 0, failed = 0;
+
+          if (guild) {
+            const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+
+            for (const channel of guild.channels.cache.values()) {
+              if (!channel.isTextBased?.() || channel.isThread?.()) continue;
+              try {
+                const perms = channel.permissionsFor(guild.members.me);
+                if (!perms?.has('ViewChannel') || !perms?.has('ReadMessageHistory')) continue;
+
+                const msgs = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+                if (!msgs || !msgs.size) continue;
+
+                const botMsgs = [...msgs.values()].filter(m => m.author?.id === client.user?.id);
+                const recent  = botMsgs.filter(m => now - m.createdTimestamp < TWO_WEEKS_MS);
+                const old     = botMsgs.filter(m => now - m.createdTimestamp >= TWO_WEEKS_MS);
+
+                if (recent.length > 1) {
+                  const r = await channel.bulkDelete(recent, true).catch(() => null);
+                  if (r) deleted += r.size;
+                } else if (recent.length === 1) {
+                  const ok = await recent[0].delete().then(() => true).catch(() => false);
+                  if (ok) deleted++; else failed++;
+                }
+
+                for (const msg of old) {
+                  const ok = await msg.delete().then(() => true).catch(() => false);
+                  if (ok) deleted++; else failed++;
+                }
+              } catch { failed++; }
+            }
+          }
+
+          return send(200, { ok: true, deleted, failed });
+        }
+
         if (req.method === 'POST' && sub === '/disconnect') {
           const { disconnectGuild } = require('./player');
           await disconnectGuild(guildId);

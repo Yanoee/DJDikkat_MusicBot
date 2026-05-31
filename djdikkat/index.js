@@ -21,7 +21,7 @@ const { getState, getActiveVoiceCount } = require('./state');
 const { disconnectGuild } = require('./player');
 const { sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { startInternalServer } = require('./internal-server');
-const { getAllSavedUiMessages, clearUiMessage } = require('./memory');
+const { getAllSavedUiMessages, clearUiMessage, getAllSavedStatsMessages, clearStatsMessage } = require('./memory');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const required = [
@@ -109,6 +109,7 @@ client.once(Events.ClientReady, async () => {
   }
 
   await cleanupStaleCards(client);
+  cleanupStaleStats(client);
   await announceOnStartup(client);
   setInterval(() => announceWeekly(client), 60 * 60 * 1000);
 
@@ -134,6 +135,41 @@ async function cleanupStaleCards(client) {
   if (saved.length > 0) {
     console.log(`🧹 Cleaned up ${saved.length} stale card(s) from previous session`);
   }
+}
+
+function cleanupStaleStats(client) {
+  const AUTO_DELETE_MS = 3 * 60 * 1000;
+  const saved = getAllSavedStatsMessages();
+  if (!saved.length) return;
+
+  let scheduled = 0;
+  for (const { guildId, channelId, messageId, postedAt } of saved) {
+    const elapsed   = postedAt ? Date.now() - new Date(postedAt).getTime() : Infinity;
+    const remaining = Math.max(0, AUTO_DELETE_MS - elapsed);
+
+    const deleteMsg = async () => {
+      try {
+        const channel = client.channels.cache.get(channelId)
+          || await client.channels.fetch(channelId).catch(() => null);
+        if (channel?.messages) {
+          const msg = await channel.messages.fetch(messageId).catch(() => null);
+          if (msg) await msg.delete().catch(() => {});
+        }
+      } catch {}
+      await clearStatsMessage(guildId);
+    };
+
+    if (remaining === 0) {
+      deleteMsg();
+    } else {
+      setTimeout(deleteMsg, remaining);
+      scheduled++;
+    }
+  }
+
+  const instant = saved.length - scheduled;
+  if (instant)   console.log(`📊 Deleted ${instant} expired stats card(s) on startup`);
+  if (scheduled) console.log(`📊 Scheduled cleanup for ${scheduled} stats card(s) (within 3 min window)`);
 }
 
 async function announceOnStartup(client) {

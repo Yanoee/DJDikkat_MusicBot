@@ -12,20 +12,23 @@ const ANNOUNCEMENT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function buildAnnouncementEmbed() {
   return new EmbedBuilder()
-    .setTitle('🎉 DJ DIKKAT is Free Forever')
+    .setTitle('🎵 Hey! DJ DIKKAT is still free — and always will be.')
     .setColor(0x2b6cb0)
     .setDescription(
-      'Welcome! DJ DIKKAT is a free music bot and will remain free. ' +
-      'There is no paid version planned now or in the future. ' +
-      'Donations are always appreciated but never required. ' +
-      'Enjoy the music and use /play to start your queue!'
+      'Just a quick weekly reminder that DJ DIKKAT is completely free.\n' +
+      'No premium plan. No ads. No paywalls. Just music.\n\n' +
+      'If the bot has been useful, consider supporting on Patreon — it helps\n' +
+      'keep the servers running. But it\'s never required. Ever.'
     )
     .addFields(
-      { name: '💡 Free forever', value: 'No paid plan now, no paid plan later.', inline: false },
-      { name: '🙌 Support', value: 'If you enjoy the bot, donations are welcome but not expected.', inline: false },
-      { name: '🌐 Website', value: '[www.djdikkat.com](https://www.djdikkat.com)', inline: false },
-      { name: '👤 Author', value: '[Yanoee](https://github.com/Yanoee)', inline: false }
-    );
+      { name: '💡 Free forever',  value: 'No paid plan now. No paid plan ever. That\'s a promise.',                                         inline: false },
+      { name: '❤️ Support (optional)', value: '[patreon.com/Yanoee](https://www.patreon.com/Yanoee) — keeps the lights on',                 inline: false },
+      { name: '🌐 Website',       value: '[www.djdikkat.com](https://www.djdikkat.com)',                                                     inline: false },
+      { name: '🐛 Found a bug?',  value: '[github.com/Yanoee/DJDikkat_MusicBot/issues](https://github.com/Yanoee/DJDikkat_MusicBot/issues)', inline: false },
+      { name: '👤 Built by',      value: 'Yanoee — one person, doing this in spare time',                                                    inline: false }
+    )
+    .setFooter({ text: 'This message appears weekly • Admins can dismiss it' })
+    .setTimestamp();
 }
 
 function canSendInChannel(channel, guild) {
@@ -137,11 +140,15 @@ async function sendOwnerWelcome(guild, client) {
     const owner = await client.users.fetch(guild.ownerId);
     if (!owner) return;
 
+    const guildName = guild?.name ?? 'your server';
+
     const embed = new EmbedBuilder()
-      .setTitle(`👋 DJ DIKKAT joined ${guild.name}!`)
+      .setTitle(`👋 Thanks for adding DJ DIKKAT to ${guildName}!`)
       .setColor(0x2b6cb0)
       .setDescription(
-        'Thanks for adding me! Here\'s a quick overview to get started.'
+        'Hey! I\'m DJ DIKKAT — a free Discord music bot built by one person in their spare time.\n' +
+        'No ads. No premium tiers. No BS. Just music, free forever.\n\n' +
+        'Here\'s everything you need to get started:'
       )
       .addFields(
         {
@@ -164,15 +171,33 @@ async function sendOwnerWelcome(guild, client) {
           inline: false
         },
         {
+          name: '💸 Completely free',
+          value: 'DJ DIKKAT is free forever. No hidden costs, no trials.\nIf you ever want to support the project: [patreon.com/Yanoee](https://www.patreon.com/Yanoee) — never required.',
+          inline: false
+        },
+        {
           name: '🌐 Website & Support',
           value: '[www.djdikkat.com](https://www.djdikkat.com) — info, bug reports & donations',
           inline: false
+        },
+        {
+          name: '🐛 Report a bug',
+          value: '[github.com/Yanoee/DJDikkat_MusicBot/issues](https://github.com/Yanoee/DJDikkat_MusicBot/issues)',
+          inline: false
         }
       )
-      .setFooter({ text: 'This is a one-time setup message • DJ DIKKAT' })
+      .setFooter({ text: 'One-time setup message • Built by Yanoee • djdikkat.com' })
       .setTimestamp();
 
-    await owner.send({ embeds: [embed] });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`dmremove:welcome:${owner.id}`)
+        .setLabel('Remove')
+        .setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    await owner.send({ embeds: [embed], components: [row] });
   } catch (err) {
     console.warn(`Could not DM owner of guild ${guild.id}: ${err.message}`);
   }

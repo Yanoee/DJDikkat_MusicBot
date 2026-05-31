@@ -12,22 +12,21 @@ const ANNOUNCEMENT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function buildAnnouncementEmbed() {
   return new EmbedBuilder()
-    .setTitle('🎵 Hey! DJ DIKKAT is still free — and always will be.')
+    .setTitle('🎵 DJ DIKKAT Apperead!. 🎊')
     .setColor(0x2b6cb0)
     .setDescription(
       'Just a quick weekly reminder that DJ DIKKAT is completely free.\n' +
       'No premium plan. No ads. No paywalls. Just music.\n\n' +
-      'If the bot has been useful, consider supporting on Patreon — it helps\n' +
-      'keep the servers running. But it\'s never required. Ever.'
+      'If the bot has been useful, consider supporting on Patreon,\n' +
+      'it helps to keep the servers running. But it\'s never required.'
     )
     .addFields(
-      { name: '💡 Free forever',  value: 'No paid plan now. No paid plan ever. That\'s a promise.',                                         inline: false },
-      { name: '❤️ Support (optional)', value: '[patreon.com/Yanoee](https://www.patreon.com/Yanoee) — keeps the lights on',                 inline: false },
-      { name: '🌐 Website',       value: '[www.djdikkat.com](https://www.djdikkat.com)',                                                     inline: false },
-      { name: '🐛 Found a bug?',  value: '[github.com/Yanoee/DJDikkat_MusicBot/issues](https://github.com/Yanoee/DJDikkat_MusicBot/issues)', inline: false },
-      { name: '👤 Built by',      value: 'Yanoee — one person, doing this in spare time',                                                    inline: false }
+      { name: '💡 Free forever',  value: 'No paid plan now. No paid plan ever. That\'s a promise. ',                                         inline: false },
+      { name: '❤️ Support', value: '[Donations](https://www.patreon.com/16130275/join) — keeps the lights on',                 inline: false },
+      { name: '🌐 Website',       value: '[Website](https://www.djdikkat.com)',                                                     inline: false },
+      { name: '🐛 Found a bug?',  value: '[Github](https://github.com/Yanoee/DJDikkat_MusicBot/issues)', inline: false },
     )
-    .setFooter({ text: 'This message appears weekly • Admins can dismiss it' })
+    .setFooter({ text: 'This message appears weekly • Admins can dismiss it 🚀' })
     .setTimestamp();
 }
 
@@ -143,10 +142,11 @@ async function sendOwnerWelcome(guild, client) {
     const guildName = guild?.name ?? 'your server';
 
     const embed = new EmbedBuilder()
-      .setTitle(`👋 Thanks for adding DJ DIKKAT to ${guildName}!`)
+      .setTitle(`🎉 Thanks for adding DJ DIKKAT to ${guildName}! 🎉`)
       .setColor(0x2b6cb0)
       .setDescription(
-        'Hey! I\'m DJ DIKKAT — a free Discord music bot built by one person in their spare time.\n' +
+        'Hey!👋 \n' +
+        'I\'m DJ DIKKAT — a free Discord music bot.\n' +
         'No ads. No premium tiers. No BS. Just music, free forever.\n\n' +
         'Here\'s everything you need to get started:'
       )
@@ -172,7 +172,7 @@ async function sendOwnerWelcome(guild, client) {
         },
         {
           name: '💸 Completely free',
-          value: 'DJ DIKKAT is free forever. No hidden costs, no trials.\nIf you ever want to support the project: [patreon.com/Yanoee](https://www.patreon.com/Yanoee) — never required.',
+          value: 'DJ DIKKAT is free forever. No hidden costs, no trials.\nIf you ever want to support the project: [Patreon](https://www.patreon.com/16130275/join) • I will be happy!',
           inline: false
         },
         {
@@ -186,7 +186,7 @@ async function sendOwnerWelcome(guild, client) {
           inline: false
         }
       )
-      .setFooter({ text: 'One-time setup message • Built by Yanoee • djdikkat.com' })
+      .setFooter({ text: '• One-time setup message •' })
       .setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(

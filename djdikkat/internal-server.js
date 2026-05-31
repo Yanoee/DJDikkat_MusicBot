@@ -6,8 +6,9 @@
  ************************************************************/
 const http = require('http');
 const { ActivityType } = require('discord.js');
-const { sendCustomToAll, sendAnnouncement } = require('./announcement');
-const { getGuildMemory, resetGuildMemory, resetGuildHistory, setGuildSettings } = require('./memory');
+const { sendCustomToAll, sendAnnouncement, sendOwnerWelcome } = require('./announcement');
+const { cleanDms, scanAndCleanDms } = require('./dm-store');
+const { getGuildMemory, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } = require('./memory');
 const { getState, getActiveVoiceCount } = require('./state');
 
 const ACTIVITY_TYPES = {
@@ -81,6 +82,28 @@ function startInternalServer(client, port = 3001) {
         return send(200, { ok: true });
       }
 
+      // ── POST /clean-dms ──────────────────────────────────────
+      if (req.method === 'POST' && req.url === '/clean-dms') {
+        const result = await cleanDms(client);
+        return send(200, result);
+      }
+
+      // ── POST /scan-clean-dms ─────────────────────────────────
+      if (req.method === 'POST' && req.url === '/scan-clean-dms') {
+        const result = await scanAndCleanDms(client);
+        return send(200, result);
+      }
+
+      // ── POST /welcome-all ────────────────────────────────────
+      if (req.method === 'POST' && req.url === '/welcome-all') {
+        let sent = 0, failed = 0;
+        for (const guild of client.guilds.cache.values()) {
+          try { await sendOwnerWelcome(guild, client); sent++; }
+          catch { failed++; }
+        }
+        return send(200, { sent, failed, total: client.guilds.cache.size });
+      }
+
       // ── POST /announce ───────────────────────────────────────
       if (req.method === 'POST' && req.url === '/announce') {
         const payload = await readBody(req);
@@ -111,6 +134,11 @@ function startInternalServer(client, port = 3001) {
           return send(200, { ok: true });
         }
 
+        if (req.method === 'POST' && sub === '/reset-messages') {
+          await resetGuildMessages(guildId);
+          return send(200, { ok: true });
+        }
+
         if (req.method === 'POST' && sub === '/disconnect') {
           const { disconnectGuild } = require('./player');
           await disconnectGuild(guildId);
@@ -123,6 +151,13 @@ function startInternalServer(client, port = 3001) {
           await setGuildSettings(guildId, { lastAnnouncementAt: null });
           const ok = await sendAnnouncement(guild, client);
           return send(200, { ok });
+        }
+
+        if (req.method === 'POST' && sub === '/welcome') {
+          const guild = client.guilds.cache.get(guildId);
+          if (!guild) return send(404, { error: 'Guild not in cache' });
+          await sendOwnerWelcome(guild, client);
+          return send(200, { ok: true });
         }
       }
 

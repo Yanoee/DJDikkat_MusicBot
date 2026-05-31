@@ -46,6 +46,7 @@ const { buildHealthMessage } = require('./health');
 const { getHistoryPage, getGuildMemory, setGuildSettings, resetGuildMemory, resetGuildHistory, resetGuildMessages, setStatsMessage, getStatsMessage, clearStatsMessage } = require('./memory');
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 const { sendAnnouncement } = require('./announcement');
+const { trackDm } = require('./dm-store');
 
 const BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
@@ -456,7 +457,8 @@ async function handleInteraction(interaction) {
         const node = pickNode(interaction.client);
         const msg = await buildHealthMessage(interaction.client, state, meta, node, interaction.user.id, guildId);
         try {
-          await interaction.user.send(msg);
+          const sent = await interaction.user.send(msg);
+          if (sent) await trackDm(sent.channel.id, sent.id, 'health').catch(() => {});
           return interaction.reply({ content: '🩺 Health report sent to your DM.', flags: MessageFlags.Ephemeral });
         } catch {
           return interaction.reply({ content: '❌ I could not DM you. Check your privacy settings.', flags: MessageFlags.Ephemeral });
@@ -526,7 +528,8 @@ async function handleInteraction(interaction) {
         const embed = buildHistoryEmbed(guildId, pageData);
         const components = buildHistoryComponents(guildId, pageData.page, pageData.totalPages, interaction.user.id);
         try {
-          await interaction.user.send({ embeds: [embed], components });
+          const sent = await interaction.user.send({ embeds: [embed], components });
+          if (sent) await trackDm(sent.channel.id, sent.id, 'history').catch(() => {});
           return interaction.reply({ content: '📜 History sent to your DM.', flags: MessageFlags.Ephemeral });
         } catch {
           return interaction.reply({ content: '❌ I could not DM you. Check your privacy settings.', flags: MessageFlags.Ephemeral });

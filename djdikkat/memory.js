@@ -73,7 +73,8 @@ function emptyMessages() {
     uiMessageId: null,
     uiChannelId: null,
     statsMessageId: null,
-    statsChannelId: null
+    statsChannelId: null,
+    statsPostedAt: null
   };
 }
 
@@ -275,6 +276,7 @@ async function setStatsMessage(guildId, channelId, messageId) {
   const msg = loadMessages(guildId);
   msg.statsMessageId = messageId || null;
   msg.statsChannelId = channelId || null;
+  msg.statsPostedAt  = messageId ? new Date().toISOString() : null;
   scheduleMsgWrite(guildId);
 }
 
@@ -286,8 +288,23 @@ function getStatsMessage(guildId) {
   const msg = loadMessages(guildId);
   return {
     messageId: msg.statsMessageId || null,
-    channelId: msg.statsChannelId || null
+    channelId: msg.statsChannelId || null,
+    postedAt:  msg.statsPostedAt  || null
   };
+}
+
+function getAllSavedStatsMessages() {
+  const results = [];
+  const guildsDir = path.join(DATA_DIR, 'guilds');
+  if (!fs.existsSync(guildsDir)) return results;
+  const entries = fs.readdirSync(guildsDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const guildId = entry.name;
+    const { messageId, channelId, postedAt } = getStatsMessage(guildId);
+    if (messageId && channelId) results.push({ guildId, messageId, channelId, postedAt });
+  }
+  return results;
 }
 
 // ── Exports ───────────────────────────────────────────────
@@ -306,5 +323,6 @@ module.exports = {
   getAllSavedUiMessages,
   setStatsMessage,
   clearStatsMessage,
+  getAllSavedStatsMessages,
   getStatsMessage
 };

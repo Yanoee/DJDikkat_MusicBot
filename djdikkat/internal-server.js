@@ -8,6 +8,7 @@ const http = require('http');
 const { ActivityType } = require('discord.js');
 const { sendCustomToAll, sendAnnouncement } = require('./announcement');
 const { getGuildMemory, resetGuildMemory, resetGuildHistory, setGuildSettings } = require('./memory');
+const { getState, getActiveVoiceCount } = require('./state');
 
 const ACTIVITY_TYPES = {
   Playing:   ActivityType.Playing,
@@ -36,12 +37,26 @@ function startInternalServer(client, port = 3001) {
     const handle = async () => {
       // ── GET /guilds ──────────────────────────────────────────
       if (req.method === 'GET' && req.url === '/guilds') {
-        const guilds = [...client.guilds.cache.values()].map(g => ({
-          id: g.id, name: g.name, memberCount: g.memberCount,
-          icon: g.iconURL({ size: 64 }) || null,
-          joinedAt: g.joinedAt?.toISOString() || null
-        })).sort((a, b) => a.name.localeCompare(b.name));
+        const guilds = [...client.guilds.cache.values()].map(g => {
+          const state = getState(g.id);
+          return {
+            id: g.id, name: g.name, memberCount: g.memberCount,
+            icon: g.iconURL({ size: 64 }) || null,
+            joinedAt: g.joinedAt?.toISOString() || null,
+            playing: !!state.current,
+            paused: state.paused || false,
+            currentTrack: state.current?.info?.title || null,
+            voiceChannelId: state.voiceChannelId || null
+          };
+        }).sort((a, b) => a.name.localeCompare(b.name));
         return send(200, { guilds, total: guilds.length });
+      }
+
+      if (req.method === 'GET' && req.url === '/stats') {
+        return send(200, {
+          activeVoice: getActiveVoiceCount(),
+          totalGuilds: client.guilds.cache.size
+        });
       }
 
       // ── GET /presence ────────────────────────────────────────
@@ -93,6 +108,12 @@ function startInternalServer(client, port = 3001) {
 
         if (req.method === 'POST' && sub === '/reset-history') {
           await resetGuildHistory(guildId);
+          return send(200, { ok: true });
+        }
+
+        if (req.method === 'POST' && sub === '/disconnect') {
+          const { disconnectGuild } = require('./player');
+          await disconnectGuild(guildId);
           return send(200, { ok: true });
         }
 

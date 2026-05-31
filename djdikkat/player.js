@@ -24,9 +24,17 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
 async function updateVoiceChannelStatus(state, text) {
-  // Discord does not expose a public REST endpoint to set voice channel status.
-  // This function is intentionally a no-op to avoid unnecessary failed requests.
-  return;
+  if (!state.voiceChannelId || !DISCORD_TOKEN) return;
+  try {
+    await fetch(`${DISCORD_API_BASE}/channels/${state.voiceChannelId}/voice-status`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bot ${DISCORD_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ status: text || '' })
+    });
+  } catch {}
 }
 
 function buildVoiceStatusText(state) {

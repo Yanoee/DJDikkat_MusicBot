@@ -114,10 +114,10 @@ function buildHistoryComponents(guildId, page, totalPages, userId) {
 const slashCommands = [
   new SlashCommandBuilder()
     .setName('play')
-    .setDescription('🎵 Play music (search / URL / Spotify)')
+    .setDescription('🎵 Play music (search / YouTube / Spotify / SoundCloud)')
     .addStringOption(o =>
       o.setName('query')
-        .setDescription('Search text or URL')
+        .setDescription('Search text, YouTube, Spotify or SoundCloud URL')
         .setRequired(true)
     ),
 
@@ -343,6 +343,10 @@ async function handleInteraction(interaction) {
             if (!tracks.length) {
               const fallback = await loadTracks(node, `ytsearch:${query}`);
               tracks = pickFirstTrack(fallback?.data ?? fallback);
+            }
+            if (!tracks.length) {
+              const sc = await loadTracks(node, `scsearch:${query}`);
+              tracks = pickFirstTrack(sc?.data ?? sc);
             }
           }
         }

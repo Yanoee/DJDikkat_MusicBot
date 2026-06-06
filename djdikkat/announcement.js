@@ -12,7 +12,7 @@ const ANNOUNCEMENT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function buildAnnouncementEmbed() {
   return new EmbedBuilder()
-    .setTitle('🎵 DJ DIKKAT Apperead!. 🎊')
+    .setTitle('🎵 DJ DIKKAT Appeared! 🎊')
     .setColor(0x2b6cb0)
     .setDescription(
       'Just a quick weekly reminder that DJ DIKKAT is completely free.\n' +

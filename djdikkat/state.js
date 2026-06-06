@@ -115,6 +115,17 @@ function getActiveVoiceCount() {
 }
 
 /**
+ * Get all guild IDs that have an active player
+ */
+function getActiveGuildIds() {
+  const ids = [];
+  for (const [guildId, state] of guildState.entries()) {
+    if (state.player && state.voiceChannelId) ids.push(guildId);
+  }
+  return ids;
+}
+
+/**
  * Clear idle UI refresh timer
  */
 function clearIdleUiTimer(state) {
@@ -142,6 +153,7 @@ module.exports = {
   armInactivity,
   getInactivityRemaining,
   getActiveVoiceCount,
+  getActiveGuildIds,
   clearIdleUiTimer,
   clearState
 };

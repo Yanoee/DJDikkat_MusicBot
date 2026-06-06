@@ -47,6 +47,7 @@ const { getHistoryPage, getGuildMemory, setGuildSettings, resetGuildMemory, rese
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 const { sendAnnouncement } = require('./announcement');
 const { trackDm } = require('./dm-store');
+const { getState: getMaintenanceState } = require('./maintenance');
 
 const BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
@@ -180,6 +181,47 @@ function pickFirstTrack(data) {
   return tracks.length ? [tracks[0]] : [];
 }
 
+function scoreTrack(track, queryWords, queryLower) {
+  const info = track.info || {};
+  const titleLower  = (info.title  || '').toLowerCase();
+  const authorLower = (info.author || '').toLowerCase();
+  const durationSec = (info.length || 0) / 1000;
+  let score = 0;
+
+  for (const word of queryWords) {
+    if (titleLower.includes(word))                       score += 3;
+    if (word.length >= 3 && authorLower.includes(word))  score += 5;
+  }
+
+  if (durationSec >= 90 && durationSec <= 600) score += 2;
+
+  if (
+    titleLower.includes('official') ||
+    titleLower.includes('audio')    ||
+    titleLower.includes('lyrics')
+  ) score += 1;
+
+  const negatives = ['cover', 'remix', 'karaoke', 'reaction', 'nightcore', 'slowed', 'reverb', 'parody', 'instrumental'];
+  for (const kw of negatives) {
+    if (titleLower.includes(kw) && !queryLower.includes(kw)) score -= 4;
+  }
+
+  return score;
+}
+
+function pickBestTrack(candidates, query) {
+  if (!candidates.length) return { track: null, score: -Infinity };
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter(w => w.length >= 2);
+  let best = candidates[0];
+  let bestScore = scoreTrack(candidates[0], queryWords, queryLower);
+  for (let i = 1; i < candidates.length; i++) {
+    const s = scoreTrack(candidates[i], queryWords, queryLower);
+    if (s > bestScore) { best = candidates[i]; bestScore = s; }
+  }
+  return { track: best, score: bestScore };
+}
+
 function getQueuePageData(state, page, pageSize = QUEUE_PAGE_SIZE) {
   const queue = Array.isArray(state?.queue) ? state.queue : [];
   const total = queue.length;
@@ -273,6 +315,12 @@ async function canControlPlayback(interaction, state) {
 
 async function handleInteraction(interaction) {
   try {
+    /* ---------------- MAINTENANCE MODE ---------------- */
+    const { enabled: maintEnabled, message: maintMessage } = getMaintenanceState();
+    if (maintEnabled && (interaction.isChatInputCommand() || interaction.isButton())) {
+      return replyEphemeral(interaction, maintMessage);
+    }
+
     /* ---------------- SLASH COMMANDS ---------------- */
     if (interaction.isChatInputCommand()) {
       const { guildId, commandName } = interaction;
@@ -339,15 +387,43 @@ async function handleInteraction(interaction) {
             const result = await loadTracks(node, query);
             tracks = extractTracks(result?.data ?? result);
           } else {
-            const primary = await loadTracks(node, `ytmsearch:${query}`);
-            tracks = pickFirstTrack(primary?.data ?? primary);
-            if (!tracks.length) {
-              const fallback = await loadTracks(node, `ytsearch:${query}`);
-              tracks = pickFirstTrack(fallback?.data ?? fallback);
+            // Fetch top candidates from ytmsearch: raw query + "official audio" variant in parallel
+            const [primary, enhanced] = await Promise.all([
+              loadTracks(node, `ytmsearch:${query}`),
+              loadTracks(node, `ytmsearch:${query} official audio`)
+            ]);
+            const ytmCandidates = [
+              ...extractTracks(primary?.data  ?? primary).slice(0, 5),
+              ...extractTracks(enhanced?.data ?? enhanced).slice(0, 3)
+            ];
+            const { track: ytmBest, score: ytmScore } = pickBestTrack(ytmCandidates, query);
+
+            // Low confidence — add ytsearch candidates to the pool and re-pick
+            if (!ytmBest || ytmScore < 3) {
+              const ytResult   = await loadTracks(node, `ytsearch:${query}`);
+              const ytCandidates = extractTracks(ytResult?.data ?? ytResult).slice(0, 5);
+              const combined   = [...(ytmBest ? [ytmBest] : []), ...ytCandidates];
+              const { track: best } = pickBestTrack(combined, query);
+              if (best) tracks = [best];
+            } else {
+              tracks = [ytmBest];
             }
+
+            // Last resort: SoundCloud
             if (!tracks.length) {
               const sc = await loadTracks(node, `scsearch:${query}`);
-              tracks = pickFirstTrack(sc?.data ?? sc);
+              const scCandidates = extractTracks(sc?.data ?? sc).slice(0, 3);
+              const { track: scBest } = pickBestTrack(scCandidates, query);
+              if (scBest) tracks = [scBest];
+            }
+
+            // Flag livestreams that weren't explicitly requested
+            if (tracks.length) {
+              const info = tracks[0].info || {};
+              const ql   = query.toLowerCase();
+              if ((info.isStream || info.length === 0) && !ql.includes('live') && !ql.includes('stream')) {
+                tracks[0]._liveWarning = true;
+              }
             }
           }
         }
@@ -356,11 +432,12 @@ async function handleInteraction(interaction) {
           return interaction.editReply('❌ No results found');
         }
 
-        const MAX_QUEUE = 5;
+        const MAX_QUEUE = 25;
         const available = Math.max(0, MAX_QUEUE - state.queue.length);
         if (available === 0) {
           return interaction.editReply(`❌ Queue is full (${MAX_QUEUE} tracks max). Skip or clear some tracks first.`);
         }
+        const originalCount = tracks.length;
         if (tracks.length > available) {
           tracks = tracks.slice(0, available);
         }
@@ -377,9 +454,11 @@ async function handleInteraction(interaction) {
           await repostController(guildId, state);
         }
 
-        await interaction.editReply(
-          `✅ Added **${tracks.length}** track(s)`
-        );
+        const skipped = originalCount - tracks.length;
+        let replyMsg = `✅ Added **${tracks.length}** track(s)`;
+        if (skipped > 0) replyMsg += ` — **${skipped}** skipped (queue full at ${MAX_QUEUE})`;
+        if (tracks[0]?._liveWarning) replyMsg += `\n⚠️ This looks like a livestream — paste a direct URL for better results.`;
+        await interaction.editReply(replyMsg);
 
         if (!state.current) {
           await playNext(guildId, interaction.client);
@@ -466,10 +545,10 @@ async function handleInteraction(interaction) {
       }
 
       /* 📊 STATS */
-  if (commandName === 'stats') {
-    const payload = buildStatsChannelMessage(guildId);
-    const { messageId, channelId } = getStatsMessage(guildId);
-    const AUTO_DELETE_MS = 3 * 60 * 1000;
+      if (commandName === 'stats') {
+        const payload = buildStatsChannelMessage(guildId);
+        const { messageId, channelId } = getStatsMessage(guildId);
+        const AUTO_DELETE_MS = 3 * 60 * 1000;
         // Fallback cleanup: remove recent bot stats cards in this channel
         if (interaction.channel?.messages) {
           const recent = await interaction.channel.messages.fetch({ limit: 20 }).catch(() => null);

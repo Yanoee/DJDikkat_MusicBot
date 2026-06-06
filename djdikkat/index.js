@@ -14,7 +14,7 @@ const { startHeartbeat } = require('./logger');
 
 const { Client, GatewayIntentBits, Events, ActivityType } = require('discord.js');
 const { Shoukaku, Connectors } = require('shoukaku');
-const pkg = require('../package.json');
+const pkg = { version: '3.0.0', description: 'DJ DIKKAT' };
 
 const { handleInteraction, deployCommands } = require('./commands');
 const { getState, getActiveVoiceCount } = require('./state');
@@ -22,6 +22,7 @@ const { disconnectGuild } = require('./player');
 const { sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { startInternalServer } = require('./internal-server');
 const { getAllSavedUiMessages, clearUiMessage, getAllSavedStatsMessages, clearStatsMessage } = require('./memory');
+const { getState: getMaintenanceState } = require('./maintenance');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const required = [
@@ -102,10 +103,19 @@ client.once(Events.ClientReady, async () => {
     console.log('ℹ️  Command deploy skipped');
   }
   if (client.user) {
-    client.user.setPresence({
-      activities: [{ name: pkg.description || 'DJ DIKKAT', type: ActivityType.Playing }],
-      status: 'online'
-    });
+    const maint = getMaintenanceState();
+    if (maint.enabled) {
+      client.user.setPresence({
+        activities: [{ name: '🔧 Under Maintenance', type: ActivityType.Playing }],
+        status: 'idle'
+      });
+      console.warn('⚠️  Bot started in MAINTENANCE MODE — commands are blocked');
+    } else {
+      client.user.setPresence({
+        activities: [{ name: pkg.description || 'DJ DIKKAT', type: ActivityType.Playing }],
+        status: 'online'
+      });
+    }
   }
 
   await cleanupStaleCards(client);

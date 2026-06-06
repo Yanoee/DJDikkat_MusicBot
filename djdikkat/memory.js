@@ -101,7 +101,7 @@ function loadMessages(guildId) {
     const file = msgFile(guildId);
     if (fs.existsSync(file)) {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && parsed.version) data = parsed;
+      if (parsed && parsed.version) data = { ...emptyMessages(), ...parsed };
     }
   } catch {}
   msgCache.set(guildId, data);

@@ -8,7 +8,7 @@
 [![Website](https://img.shields.io/badge/Website-djdikkat.com-blue)](https://www.djdikkat.com)
 [![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen)](https://www.djdikkat.com)
 
-# 🎧 DJ DIKKAT — Free Discord Music Bot
+# 🎧 DJ DIKKAT - Free Discord Music Bot
 
 A free, open source Discord music bot with Spotify and YouTube support.  
 No ads. No premium. No BS. Built by one person, free for everyone.
@@ -21,21 +21,21 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 
 ## 🔧 Features
 
-- **Multi-source playback** — Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
-- **Spotify support** — Resolves Spotify tracks, albums, and full playlists to YouTube via the Spotify Web API. No Spotify premium account needed on your end.
-- **Interactive player card** — A persistent embed in your text channel with live controls. No need to type commands — everything is a button click.
-- **3-state loop** — Cycles Off → Track → Queue → Off. Toggle any time from the player card or `/play`.
-- **Queue shuffle** — Fisher-Yates shuffle applied instantly, reflected live in the card.
-- **Play history** — Per-guild log of up to 200 tracks with timestamps and requester info. Paginated and sent to your DM via `/history`.
-- **Stats tracking** — Per-guild stats: most-played songs, top users, daily and weekly breakdowns. Data older than 30 days is pruned automatically.
-- **Auto-disconnect** — Bot leaves after 5 minutes of idle. No manual cleanup needed.
-- **Idle player card** — When the queue empties, the card stays with a live countdown and a "Play Again" button for the last track.
-- **Clean chat** — Player card is deleted and reposted fresh with each new song. Stale cards from previous sessions are cleaned up on startup.
-- **Auto-leave on empty voice** — Bot disconnects immediately when the last human leaves the voice channel.
-- **Voice channel status** — Updates the voice channel status to show the currently playing track.
-- **Weekly announcements** — Sends an informational embed to each guild every 7 days (dismissible by admins).
-- **Owner welcome DM** — When added to a new server, the owner gets a DM with a quick-start guide and required permissions list.
-- **Per-guild data isolation** — History, stats, and settings live in separate JSON files per guild. One guild can never touch another's data.
+- **Multi-source playback** - Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
+- **Spotify support** - Resolves Spotify tracks, albums, and full playlists to YouTube via the Spotify Web API. No Spotify premium account needed on your end.
+- **Interactive player card** - A persistent embed in your text channel with live controls. No need to type commands - everything is a button click.
+- **3-state loop** - Cycles Off → Track → Queue → Off. Toggle any time from the player card or `/play`.
+- **Queue shuffle** - Fisher-Yates shuffle applied instantly, reflected live in the card.
+- **Play history** - Per-guild log of up to 200 tracks with timestamps and requester info. Paginated and sent to your DM via `/history`.
+- **Stats tracking** - Per-guild stats: most-played songs, top users, daily and weekly breakdowns. Data older than 30 days is pruned automatically.
+- **Auto-disconnect** - Bot leaves after 5 minutes of idle. No manual cleanup needed.
+- **Idle player card** - When the queue empties, the card stays with a live countdown and a "Play Again" button for the last track.
+- **Clean chat** - Player card is deleted and reposted fresh with each new song. Stale cards from previous sessions are cleaned up on startup.
+- **Auto-leave on empty voice** - Bot disconnects immediately when the last human leaves the voice channel.
+- **Voice channel status** - Updates the voice channel status to show the currently playing track.
+- **Weekly announcements** - Sends an informational embed to each guild every 7 days (dismissible by admins).
+- **Owner welcome DM** - When added to a new server, the owner gets a DM with a quick-start guide and required permissions list.
+- **Per-guild data isolation** - History, stats, and settings live in separate JSON files per guild. One guild can never touch another's data.
 
 ---
 
@@ -49,9 +49,9 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 | `/stop` | Stop playback and clear the queue. Bot stays in voice. |
 | `/queue` | Show the current queue with requester info. Paginated, 10 tracks per page. |
 | `/history` | View recently played tracks for this server. Paginated, sent via DM. |
-| `/stats` | Show music stats — top songs, top users, today's top, and weekly top. Auto-deletes after 3 minutes if nothing is playing. |
+| `/stats` | Show music stats - top songs, top users, today's top, and weekly top. Auto-deletes after 3 minutes if nothing is playing. |
 | `/disconnect` | Stop everything and disconnect the bot from voice. |
-| `/health` | *(Admin only)* Full health report sent via DM — Discord ping, RAM, CPU, Lavalink node stats, uptime, yt-cipher status, and last update info. |
+| `/health` | *(Admin only)* Full health report sent via DM - Discord ping, RAM, CPU, Lavalink node stats, uptime, yt-cipher status, and last update info. |
 
 ### Player Card Buttons
 
@@ -87,14 +87,14 @@ When music is playing, a rich embed appears in your text channel:
 
 ## 🛠 Tech Stack
 
-- **Debian 12 (Bookworm)** — production server environment
-- **Node.js ≥ 18** — runtime
-- **Discord.js v14** — Discord API wrapper
-- **Shoukaku v4** — Lavalink client for Node.js
-- **Lavalink** — audio streaming backend
-- **Spotify Web API** — track metadata and resolution for Spotify links
-- **dotenv** — environment variable management
-- **Plain JavaScript** — no framework, no bloat
+- **Debian 12 (Bookworm)** - production server environment
+- **Node.js ≥ 18** - runtime
+- **Discord.js v14** - Discord API wrapper
+- **Shoukaku v4** - Lavalink client for Node.js
+- **Lavalink** - audio streaming backend
+- **Spotify Web API** - track metadata and resolution for Spotify links
+- **dotenv** - environment variable management
+- **Plain JavaScript** - no framework, no bloat
 
 ---
 
@@ -117,7 +117,7 @@ Every patron helps keep the server running. Nothing is ever required.
 
 ## 📜 License
 
-[MIT](LICENSE) — do what you want, just don't claim it's yours.
+[MIT](LICENSE) - do what you want, just don't claim it's yours.
 
 ### Author
 - [@Yanoee](https://www.github.com/Yanoee)

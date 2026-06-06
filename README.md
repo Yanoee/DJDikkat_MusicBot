@@ -24,7 +24,7 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 - **Multi-source playback** - Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
 - **Spotify support** - Resolves Spotify tracks, albums, and full playlists to YouTube via the Spotify Web API. No Spotify premium account needed on your end.
 - **Interactive player card** - A persistent embed in your text channel with live controls. No need to type commands - everything is a button click.
-- **3-state loop** - Cycles Off → Track → Queue → Off. Toggle any time from the player card or `/play`.
+- **3-state loop** - Cycles Off ~ Track ~ Queue ~ Off. Toggle any time from the player card or `/play`.
 - **Queue shuffle** - Fisher-Yates shuffle applied instantly, reflected live in the card.
 - **Play history** - Per-guild log of up to 200 tracks with timestamps and requester info. Paginated and sent to your DM via `/history`.
 - **Stats tracking** - Per-guild stats: most-played songs, top users, daily and weekly breakdowns. Data older than 30 days is pruned automatically.
@@ -69,7 +69,7 @@ When music is playing, a rich embed appears in your text channel:
 
 | Button | Action |
 |---|---|
-| 🔁 / 🔂 | Cycle loop mode (Off → Track → Queue → Off) |
+| 🔁 / 🔂 | Cycle loop mode (Off ~ Track ~ Queue ~ Off) |
 | 🔀 | Shuffle the queue |
 | 📜 | View the queue |
 | 🧹 | Clear the queue |
@@ -109,7 +109,7 @@ It is not official, not affiliated, and not monetized, just a small personal tri
 
 DJ DIKKAT is free forever. If it saved you from paying for another bot, consider supporting on Patreon.
 
-→ [patreon.com/Yanoee](https://www.patreon.com/Yanoee)
+~ [patreon.com/Yanoee](https://www.patreon.com/Yanoee)
 
 Every patron helps keep the server running. Nothing is ever required.
 

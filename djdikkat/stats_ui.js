@@ -101,7 +101,7 @@ function buildStatsEmbed(guildId) {
       value: weeklyTop.length
         ? (() => {
             const title = truncateTitle(weeklyTop[0].key);
-            const url   = getUrlForTitle(weeklyTop[0].key);
+            const url   = getAnyUrlForTitle(weeklyTop[0].key);
             return url
               ? `⭐ [${title}](${url}) — ${weeklyTop[0].count}`
               : `⭐ ${title} — ${weeklyTop[0].count}`;

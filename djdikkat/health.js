@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder
- * Build 2.1.0
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 
@@ -82,19 +82,6 @@ function averageCpuPercent() {
 
 // ── External service checks ───────────────────────────────
 
-async function pingYtCipher() {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch('http://127.0.0.1:8001', {
-      signal: controller.signal
-    }).finally(() => clearTimeout(timer));
-    return (res.ok || res.status < 500) ? '🟢 Online' : `🟡 HTTP ${res.status}`;
-  } catch {
-    return '🔴 Offline';
-  }
-}
-
 function loadLastUpdate() {
   try {
     if (!fs.existsSync(LAST_UPDATE_FILE)) return null;
@@ -116,20 +103,16 @@ function formatLastUpdate(update) {
 
   const lines = [`${icon} ${statusText} • ${when}`];
 
-  if (update.lavalink) {
-    lines.push(`🎚️ Lavalink  ${update.lavalink.updated ? '🔄 updated' : '✔️ no change'}`);
-  }
-
-  if (update.ytcipher) {
-    const yc  = update.ytcipher;
-    const msg = yc.message ? ` — ${String(yc.message).slice(0, 60)}` : '';
-    lines.push(`🔧 yt-cipher  ${yc.updated ? `🔄 \`${yc.commit || '?'}\`${msg}` : '✔️ no change'}`);
+  if (update.nodelink) {
+    const nl  = update.nodelink;
+    const sha = nl.commitAfter ? ` → \`${nl.commitAfter}\`` : '';
+    lines.push(`🎚️ NodeLink  ${nl.updated ? `🔄 updated${sha}` : '✔️ no change'}`);
   }
 
   return lines.join('\n');
 }
 
-// ── Embed builder (async — pings yt-cipher) ───────────────
+// ── Embed builder ─────────────────────────────────────────
 
 async function buildHealthEmbed(client, state, meta, node) {
   const nodeStats = node?.stats ?? null;
@@ -143,10 +126,7 @@ async function buildHealthEmbed(client, state, meta, node) {
     return rem ? formatMs(rem) : '—';
   })();
 
-  const [ytCipherStatus, lastUpdate] = await Promise.all([
-    pingYtCipher(),
-    Promise.resolve(loadLastUpdate())
-  ]);
+  const lastUpdate = loadLastUpdate();
 
   const embed = new EmbedBuilder()
     .setTitle('🩺 DJ DIKKAT Health')
@@ -163,7 +143,7 @@ async function buildHealthEmbed(client, state, meta, node) {
     { name: '🕒 Uptime',         value: formatUptime(process.uptime()),                                       inline: true }
   );
 
-  // ── Lavalink ──────────────────────────────────────────────
+  // ── NodeLink ──────────────────────────────────────────────
   const nodeState   = node
     ? (node.state === 2 ? '🟢 Connected' : '🟡 Reconnecting')
     : '🔴 Unavailable';
@@ -179,11 +159,11 @@ async function buildHealthEmbed(client, state, meta, node) {
     ? `deficit ${nodeStats.frameStats.deficit} / nulled ${nodeStats.frameStats.nulled}` : '—';
 
   embed.addFields(
-    { name: '🎚️ Lavalink',     value: nodeState,   inline: true },
-    { name: '📡 LL Ping',       value: nodePing,    inline: true },
-    { name: '🎶 LL Players',    value: nodePlayers, inline: true },
-    { name: '🔥 LL CPU',        value: nodeCpu,     inline: true },
-    { name: '💾 LL Memory',     value: nodeMem,     inline: true },
+    { name: '🎚️ NodeLink',     value: nodeState,   inline: true },
+    { name: '📡 NL Ping',       value: nodePing,    inline: true },
+    { name: '🎶 NL Players',    value: nodePlayers, inline: true },
+    { name: '🔥 NL CPU',        value: nodeCpu,     inline: true },
+    { name: '💾 NL Memory',     value: nodeMem,     inline: true },
     { name: '⚠️ Frame Stats',   value: nodeFrames,  inline: true }
   );
 
@@ -196,9 +176,8 @@ async function buildHealthEmbed(client, state, meta, node) {
 
   // ── Services ──────────────────────────────────────────────
   embed.addFields(
-    { name: '🔧 yt-cipher',    value: ytCipherStatus,                                                              inline: true },
-    { name: '🧾 Stats written', value: meta.lastWriteTime ? timeAgo(meta.lastWriteTime.toISOString()) : '—',        inline: true },
-    { name: '🔥 Load Average',  value: os.loadavg().map(v => v.toFixed(2)).join(' / '),                             inline: true }
+    { name: '🧾 Stats written', value: meta.lastWriteTime ? timeAgo(meta.lastWriteTime.toISOString()) : '—', inline: true },
+    { name: '🔥 Load Average',  value: os.loadavg().map(v => v.toFixed(2)).join(' / '),                       inline: true }
   );
 
   // ── Last Update ────────────────────────────────────────────

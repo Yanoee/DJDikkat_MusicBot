@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Announcement helper
  * Welcome and weekly announcement scheduling
- * Build 2.1.0
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 

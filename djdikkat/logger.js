@@ -2,14 +2,15 @@
  * DJ DIKKAT - Music Bot
  * Logger
  * Timestamped console output — patches global console
- * Build 1.1.0
+ * Writes to stdout (journalctl) and a rotating log file
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 const util = require('util');
+const fs   = require('fs');
+const path = require('path');
 
 // Only apply ANSI colors when attached to a real terminal.
-// Under systemd the process has no TTY, so codes would appear as raw text
-// in journalctl and the admin panel SSE stream.
 const TTY = Boolean(process.stdout.isTTY);
 
 const C = TTY ? {
@@ -23,6 +24,36 @@ const _log   = console.log.bind(console);
 const _warn  = console.warn.bind(console);
 const _error = console.error.bind(console);
 
+// ── File output ───────────────────────────────────────────────
+const LOG_FILE    = process.env.BOT_LOG_FILE || path.join(__dirname, 'data', 'bot.log');
+const LOG_MAX     = 20 * 1024 * 1024; // 20 MB before rotation
+const ANSI_RE     = /\x1b\[[0-9;]*m/g;
+let   _logStream  = null;
+let   _writeCount = 0;
+
+function openStream() {
+  try {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    _logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    _logStream.on('error', () => { _logStream = null; });
+  } catch { _logStream = null; }
+}
+
+function writeFile(line) {
+  if (!_logStream) openStream();
+  if (!_logStream) return;
+  _logStream.write(line.replace(ANSI_RE, '') + '\n');
+  if (++_writeCount % 100 === 0) {
+    try {
+      if (fs.statSync(LOG_FILE).size > LOG_MAX) {
+        _logStream.end(); _logStream = null;
+        try { fs.renameSync(LOG_FILE, LOG_FILE + '.1'); } catch {}
+      }
+    } catch {}
+  }
+}
+
+// ── Timestamp ─────────────────────────────────────────────────
 function ts() {
   const d = new Date();
   const p = n => String(n).padStart(2, '0');
@@ -37,10 +68,12 @@ function fmt(...args) {
   }).join(' ');
 }
 
-console.log   = (...a) => _log(`${ts()} ${fmt(...a)}`);
-console.warn  = (...a) => _warn(`${ts()} ${C.yellow}${fmt(...a)}${C.reset}`);
-console.error = (...a) => _error(`${ts()} ${C.red}${fmt(...a)}${C.reset}`);
+// Patch console methods — each writes to stdout AND the log file
+console.log   = (...a) => { const l = `${ts()} ${fmt(...a)}`;                        _log(l);   writeFile(l); };
+console.warn  = (...a) => { const l = `${ts()} ${C.yellow}${fmt(...a)}${C.reset}`;   _warn(l);  writeFile(l); };
+console.error = (...a) => { const l = `${ts()} ${C.red}${fmt(...a)}${C.reset}`;      _error(l); writeFile(l); };
 
+// ── Heartbeat ─────────────────────────────────────────────────
 function formatUptime(ms) {
   const s = Math.floor(ms / 1000);
   const h = Math.floor(s / 3600);
@@ -54,7 +87,9 @@ function startHeartbeat(client, getActiveVoiceCount) {
     const uptime = formatUptime(process.uptime() * 1000);
     const guilds = client.guilds?.cache?.size ?? '?';
     const active = getActiveVoiceCount();
-    _log(`${ts()} 💓 ${active} playing  •  ${guilds} guilds  •  ${mem}MB  •  up ${uptime}`);
+    const line   = `${ts()} 💓 ${active} playing  •  ${guilds} guilds  •  ${mem}MB  •  up ${uptime}`;
+    _log(line);
+    writeFile(line);
   }, 10 * 60 * 1000);
 }
 

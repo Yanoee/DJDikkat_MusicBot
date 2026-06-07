@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Internal HTTP server
  * Localhost-only API so admin-api can trigger bot actions
- * Build 2.0.0
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 const http = require('http');
@@ -10,7 +10,6 @@ const { sendCustomToAll, sendAnnouncement, sendOwnerWelcome } = require('./annou
 const { cleanDms, scanAndCleanDms } = require('./dm-store');
 const { getGuildMemory, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } = require('./memory');
 const { getState, getActiveVoiceCount, getActiveGuildIds } = require('./state');
-const { getState: getMaintenanceState, enable: enableMaintenance, disable: disableMaintenance } = require('./maintenance');
 
 const ACTIVITY_TYPES = {
   Playing:   ActivityType.Playing,
@@ -112,48 +111,6 @@ function startInternalServer(client, port = 3001) {
         if (payload.message.length > 4000) return send(400, { error: 'Message too long' });
         const results = await sendCustomToAll(client, payload);
         return send(200, { ok: true, ...results });
-      }
-
-      // ── GET /maintenance ────────────────────────────────────────
-      if (req.method === 'GET' && req.url === '/maintenance') {
-        return send(200, getMaintenanceState());
-      }
-
-      // ── POST /maintenance/enable ─────────────────────────────────
-      if (req.method === 'POST' && req.url === '/maintenance/enable') {
-        const { message } = await readBody(req);
-        await enableMaintenance(message);
-
-        if (client.user) {
-          client.user.setPresence({
-            status: 'idle',
-            activities: [{ name: '🔧 Under Maintenance', type: ActivityType.Playing }]
-          });
-        }
-
-        const { disconnectGuild } = require('./player');
-        const activeIds = getActiveGuildIds();
-        for (const guildId of activeIds) {
-          await disconnectGuild(guildId).catch(() => {});
-        }
-
-        console.warn(`⚠️  MAINTENANCE MODE ENABLED — disconnected ${activeIds.length} session(s)`);
-        return send(200, { ok: true, disconnected: activeIds.length });
-      }
-
-      // ── POST /maintenance/disable ────────────────────────────────
-      if (req.method === 'POST' && req.url === '/maintenance/disable') {
-        await disableMaintenance();
-
-        if (client.user) {
-          client.user.setPresence({
-            status: 'online',
-            activities: [{ name: 'DJ DIKKAT', type: ActivityType.Playing }]
-          });
-        }
-
-        console.log('✅ Maintenance mode disabled — bot is back online');
-        return send(200, { ok: true });
       }
 
       // ── Guild routes: /guild/:id/* ───────────────────────────

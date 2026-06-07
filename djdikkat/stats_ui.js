@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats UI
  * Per-guild stats embed builder
- * Build 2.1.0
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 

@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats engine
  * Per-guild JSON-backed play counters and rollups
- * Build 2.1.0
+ * Build 4.0.0
  * Author: Yanoee
  *
  * File layout:

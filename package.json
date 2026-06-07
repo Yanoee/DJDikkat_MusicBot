@@ -1,6 +1,6 @@
 {
   "name": "djdikkat",
-  "version": "3.03b.12",
+  "version": "4.0.0",
   "description": "🎵 Dakka Records INC.",
   "main": "djdikkat/index.js",
   "scripts": {
@@ -11,7 +11,7 @@
     "discord",
     "discord-bot",
     "music",
-    "lavalink",
+    "nodelink",
     "shoukaku",
     "spotify",
     "youtube"

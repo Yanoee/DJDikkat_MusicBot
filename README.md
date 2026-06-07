@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow)](https://github.com/Yanoee/DJDikkat_MusicBot/blob/main/LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A518-green?logo=node.js)](https://nodejs.org/)
 [![Discord.js](https://img.shields.io/badge/discord.js-v14-blue?logo=discord)](https://discord.js.org/)
-[![Lavalink](https://img.shields.io/badge/Lavalink-Audio-purple)](https://github.com/lavalink-devs/Lavalink)
+[![NodeLink](https://img.shields.io/badge/NodeLink-Audio-purple)](https://github.com/PerformanC/NodeLink)
 [![Shoukaku](https://img.shields.io/badge/Shoukaku-v4-orange)](https://github.com/Deivu/Shoukaku)
 [![Website](https://img.shields.io/badge/Website-djdikkat.com-blue)](https://www.djdikkat.com)
 [![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen)](https://www.djdikkat.com)
@@ -51,7 +51,7 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 | `/history` | View recently played tracks for this server. Paginated, sent via DM. |
 | `/stats` | Show music stats - top songs, top users, today's top, and weekly top. Auto-deletes after 3 minutes if nothing is playing. |
 | `/disconnect` | Stop everything and disconnect the bot from voice. |
-| `/health` | *(Admin only)* Full health report sent via DM - Discord ping, RAM, CPU, Lavalink node stats, uptime, yt-cipher status, and last update info. |
+| `/health` | *(Admin only)* Full health report sent via DM - Discord ping, RAM, CPU, NodeLink stats, uptime, and last update info. |
 
 ### Player Card Buttons
 
@@ -90,8 +90,8 @@ When music is playing, a rich embed appears in your text channel:
 - **Debian 12 (Bookworm)** - production server environment
 - **Node.js ≥ 18** - runtime
 - **Discord.js v14** - Discord API wrapper
-- **Shoukaku v4** - Lavalink client for Node.js
-- **Lavalink** - audio streaming backend
+- **Shoukaku v4** - NodeLink/Lavalink client for Node.js
+- **NodeLink** - audio streaming backend
 - **Spotify Web API** - track metadata and resolution for Spotify links
 - **dotenv** - environment variable management
 - **Plain JavaScript** - no framework, no bloat

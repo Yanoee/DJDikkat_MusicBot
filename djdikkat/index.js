@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 2.0.7
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 const path = require('path');
@@ -14,7 +14,7 @@ const { startHeartbeat } = require('./logger');
 
 const { Client, GatewayIntentBits, Events, ActivityType } = require('discord.js');
 const { Shoukaku, Connectors } = require('shoukaku');
-const pkg = { version: '3.0.0', description: 'DJ DIKKAT' };
+const pkg = { version: '4.0.0', description: 'DJ DIKKAT' };
 
 const { handleInteraction, deployCommands } = require('./commands');
 const { getState, getActiveVoiceCount } = require('./state');
@@ -22,14 +22,13 @@ const { disconnectGuild } = require('./player');
 const { sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { startInternalServer } = require('./internal-server');
 const { getAllSavedUiMessages, clearUiMessage, getAllSavedStatsMessages, clearStatsMessage } = require('./memory');
-const { getState: getMaintenanceState } = require('./maintenance');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const required = [
   ['DISCORD_TOKEN/TOKEN', DISCORD_TOKEN],
-  ['LAVALINK_HOST', process.env.LAVALINK_HOST],
-  ['LAVALINK_PORT', process.env.LAVALINK_PORT],
-  ['LAVALINK_PASSWORD', process.env.LAVALINK_PASSWORD]
+  ['NODELINK_HOST', process.env.NODELINK_HOST || process.env.LAVALINK_HOST],
+  ['NODELINK_PORT', process.env.NODELINK_PORT || process.env.LAVALINK_PORT],
+  ['NODELINK_PASSWORD', process.env.NODELINK_PASSWORD || process.env.LAVALINK_PASSWORD]
 ];
 const missing = required.filter(([, value]) => !value).map(([key]) => key);
 if (missing.length) {
@@ -45,34 +44,39 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates
   ]
 });
-client.lavalinkReadyNodes = new Set();
+client.nodelinkReadyNodes = new Set();
 
-// ---------------- LAVALINK ----------------
+// ---------------- NODELINK ----------------
+
+const NODELINK_HOST     = process.env.NODELINK_HOST     || process.env.LAVALINK_HOST;
+const NODELINK_PORT     = process.env.NODELINK_PORT     || process.env.LAVALINK_PORT;
+const NODELINK_PASSWORD = process.env.NODELINK_PASSWORD || process.env.LAVALINK_PASSWORD;
+const NODELINK_SECURE   = process.env.NODELINK_SECURE   || process.env.LAVALINK_SECURE;
 
 const shoukaku = new Shoukaku(
   new Connectors.DiscordJS(client),
   [{
     name: 'main',
-    url: `${process.env.LAVALINK_HOST}:${process.env.LAVALINK_PORT}`,
-    auth: process.env.LAVALINK_PASSWORD,
-    secure: process.env.LAVALINK_SECURE === 'true'
+    url: `${NODELINK_HOST}:${NODELINK_PORT}`,
+    auth: NODELINK_PASSWORD,
+    secure: NODELINK_SECURE === 'true'
   }]
 );
 
 client.shoukaku = shoukaku;
 
 shoukaku.on('error', (nodeName, error) => {
-  console.error(`[LAVALINK ERROR] Node ${nodeName}`, error);
+  console.error(`[NODELINK ERROR] Node ${nodeName}`, error);
 });
 
 shoukaku.on('ready', (nodeName) => {
-  console.log(`✅ Lavalink node ready: ${nodeName}`);
-  client.lavalinkReadyNodes.add(nodeName);
+  console.log(`✅ NodeLink node ready: ${nodeName}`);
+  client.nodelinkReadyNodes.add(nodeName);
 });
 
 shoukaku.on('disconnect', (nodeName, code, reason) => {
-  console.warn(`⚠️ Lavalink node disconnected: ${nodeName} (${code}) ${reason || ''}`);
-  client.lavalinkReadyNodes.delete(nodeName);
+  console.warn(`⚠️ NodeLink node disconnected: ${nodeName} (${code}) ${reason || ''}`);
+  client.nodelinkReadyNodes.delete(nodeName);
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -103,19 +107,10 @@ client.once(Events.ClientReady, async () => {
     console.log('ℹ️  Command deploy skipped');
   }
   if (client.user) {
-    const maint = getMaintenanceState();
-    if (maint.enabled) {
-      client.user.setPresence({
-        activities: [{ name: '🔧 Under Maintenance', type: ActivityType.Playing }],
-        status: 'idle'
-      });
-      console.warn('⚠️  Bot started in MAINTENANCE MODE — commands are blocked');
-    } else {
-      client.user.setPresence({
-        activities: [{ name: pkg.description || 'DJ DIKKAT', type: ActivityType.Playing }],
-        status: 'online'
-      });
-    }
+    client.user.setPresence({
+      activities: [{ name: '🎵 Dakka Records INC.', type: ActivityType.Playing }],
+      status: 'online'
+    });
   }
 
   await cleanupStaleCards(client);

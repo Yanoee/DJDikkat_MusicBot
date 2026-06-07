@@ -1,8 +1,8 @@
 ﻿/************************************************************
  * DJ DIKKAT - Music Bot
  * Player plug
- * Playback engine and Lavalink control
- * Build 3.0.0
+ * Playback engine and NodeLink control
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 const {
@@ -43,10 +43,6 @@ function buildVoiceStatusText(state) {
   return state.paused ? `⏸️ ${title}` : `🎵 Playing: ${title}`;
 }
 
-/**
- * Pick first available Lavalink node
- * (same behavior as old code)
- */
 function isNodeConnected(node) {
   const state = node?.state;
   if (state === 2) return true;
@@ -56,8 +52,8 @@ function isNodeConnected(node) {
 
 function pickNode(client) {
   const nodes = [...client.shoukaku.nodes.values()];
-  if (client.lavalinkReadyNodes && client.lavalinkReadyNodes.size > 0) {
-    const byReady = nodes.find(n => client.lavalinkReadyNodes.has(n.name));
+  if (client.nodelinkReadyNodes && client.nodelinkReadyNodes.size > 0) {
+    const byReady = nodes.find(n => client.nodelinkReadyNodes.has(n.name));
     if (byReady) return byReady;
   }
   return nodes.find(isNodeConnected) || null;
@@ -94,7 +90,7 @@ async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
       name: n.name,
       state: n.state
     }));
-    console.error('Lavalink node not ready after wait.', nodes);
+    console.error('NodeLink node not ready after wait.', nodes);
   }
   return node;
 }
@@ -131,7 +127,7 @@ async function ensurePlayer(interaction) {
   state.client = interaction.client;
 
   const node = await waitForNode(interaction.client);
-  if (!node) throw new Error('Lavalink not ready.');
+  if (!node) throw new Error('NodeLink not ready.');
 
   try {
     state.player = await interaction.client.shoukaku.joinVoiceChannel({
@@ -375,7 +371,7 @@ async function disconnectGuild(guildId) {
 }
 
 /**
- * Lavalink track loader
+ * NodeLink track loader
  */
 async function loadTracks(node, identifier) {
   if (node?.rest?.resolve) {
@@ -384,7 +380,7 @@ async function loadTracks(node, identifier) {
   const restKeys = node?.rest
     ? Object.getOwnPropertyNames(Object.getPrototypeOf(node.rest)).join(', ')
     : 'none';
-  throw new Error(`Unsupported Lavalink REST client. rest proto: ${restKeys}`);
+  throw new Error(`Unsupported NodeLink REST client. rest proto: ${restKeys}`);
 }
 
 module.exports = {

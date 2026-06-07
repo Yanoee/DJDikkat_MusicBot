@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Memory store
  * Per-guild JSON storage (history / settings / messages)
- * Build 2.1.0
+ * Build 4.0.0
  * Author: Yanoee
  *
  * File layout:

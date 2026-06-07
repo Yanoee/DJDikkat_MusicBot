@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 3.0.0
+ * Build 4.0.0
  * Author: Yanoee
  ************************************************************/
 
@@ -47,7 +47,6 @@ const { getHistoryPage, getGuildMemory, setGuildSettings, resetGuildMemory, rese
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 const { sendAnnouncement } = require('./announcement');
 const { trackDm } = require('./dm-store');
-const { getState: getMaintenanceState } = require('./maintenance');
 
 const BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
@@ -315,12 +314,6 @@ async function canControlPlayback(interaction, state) {
 
 async function handleInteraction(interaction) {
   try {
-    /* ---------------- MAINTENANCE MODE ---------------- */
-    const { enabled: maintEnabled, message: maintMessage } = getMaintenanceState();
-    if (maintEnabled && (interaction.isChatInputCommand() || interaction.isButton())) {
-      return replyEphemeral(interaction, maintMessage);
-    }
-
     /* ---------------- SLASH COMMANDS ---------------- */
     if (interaction.isChatInputCommand()) {
       const { guildId, commandName } = interaction;
@@ -354,7 +347,7 @@ async function handleInteraction(interaction) {
 
         const node = pickNode(interaction.client);
         if (!node) {
-          return interaction.editReply('❌ Lavalink not available');
+          return interaction.editReply('❌ NodeLink not available');
         }
 
         let tracks = [];
@@ -818,7 +811,7 @@ async function handleInteraction(interaction) {
           return interaction.followUp({ content: `❌ ${err.message}`, flags: MessageFlags.Ephemeral });
         }
         const node = pickNode(interaction.client);
-        if (!node) return interaction.followUp({ content: '❌ Lavalink not available', flags: MessageFlags.Ephemeral });
+        if (!node) return interaction.followUp({ content: '❌ NodeLink not available', flags: MessageFlags.Ephemeral });
         const identifier = state.lastPlayed.uri || `ytsearch:${state.lastPlayed.title}`;
         const result = await loadTracks(node, identifier);
         const tracks = extractTracks(result?.data ?? result);

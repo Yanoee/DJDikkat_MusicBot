@@ -210,6 +210,10 @@ function getGuildMemory(guildId) {
   return loadMemory(guildId);
 }
 
+function getGuildMessagesRaw(guildId) {
+  return loadMessages(guildId);
+}
+
 // ── Public API — reset (guild-scoped, never cross-guild) ──
 
 async function resetGuildMemory(guildId) {
@@ -314,6 +318,7 @@ module.exports = {
   setGuildSettings,
   getGuildMemory,
   getHistoryPage,
+  getGuildMessagesRaw,
   resetGuildMemory,
   resetGuildHistory,
   resetGuildMessages,

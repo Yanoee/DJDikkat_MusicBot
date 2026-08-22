@@ -47,10 +47,17 @@ const { getHistoryPage, getGuildMemory, setGuildSettings, resetGuildMemory, rese
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 const { sendAnnouncement } = require('./announcement');
 const { trackDm } = require('./dm-store');
+const { getMaintenance } = require('./runtime-flags');
 
-const BUTTON_COOLDOWN_MS = 5000;
+let BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
 const QUEUE_PAGE_SIZE = 10;
+
+function getButtonCooldownMs() { return BUTTON_COOLDOWN_MS; }
+function setButtonCooldownMs(ms) {
+  if (Number.isFinite(ms) && ms >= 0) BUTTON_COOLDOWN_MS = Math.min(ms, 60000);
+  return BUTTON_COOLDOWN_MS;
+}
 
 function pruneButtonCooldowns(state, now) {
   if (state.buttonCooldowns.size < BUTTON_COOLDOWN_PRUNE_LIMIT) return;
@@ -214,10 +221,13 @@ function pickBestTrack(candidates, query) {
   const queryWords = queryLower.split(/\s+/).filter(w => w.length >= 2);
   let best = candidates[0];
   let bestScore = scoreTrack(candidates[0], queryWords, queryLower);
+  console.debug(`[SEARCH] "${query}" candidate: "${candidates[0].info?.title}" score=${bestScore}`);
   for (let i = 1; i < candidates.length; i++) {
     const s = scoreTrack(candidates[i], queryWords, queryLower);
+    console.debug(`[SEARCH] "${query}" candidate: "${candidates[i].info?.title}" score=${s}`);
     if (s > bestScore) { best = candidates[i]; bestScore = s; }
   }
+  console.debug(`[SEARCH] "${query}" picked: "${best?.info?.title}" score=${bestScore}`);
   return { track: best, score: bestScore };
 }
 
@@ -337,6 +347,10 @@ async function handleInteraction(interaction) {
 
       /* 🎵 PLAY */
       if (commandName === 'play') {
+        const maintenance = getMaintenance();
+        if (maintenance.enabled) {
+          return interaction.reply({ content: maintenance.message, flags: MessageFlags.Ephemeral });
+        }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const query = interaction.options.getString('query', true);
@@ -803,6 +817,10 @@ async function handleInteraction(interaction) {
       }
 
       if (action === 'replay') {
+        const maintenance = getMaintenance();
+        if (maintenance.enabled) {
+          return interaction.followUp({ content: maintenance.message, flags: MessageFlags.Ephemeral });
+        }
         state.textChannelId = interaction.channelId;
         if (!state.lastPlayed?.uri && !state.lastPlayed?.title) {
           return interaction.followUp({ content: '❌ Nothing to replay', flags: MessageFlags.Ephemeral });
@@ -850,7 +868,9 @@ async function handleInteraction(interaction) {
 
 module.exports = {
   deployCommands,
-  handleInteraction
+  handleInteraction,
+  getButtonCooldownMs,
+  setButtonCooldownMs
 };
 
 

@@ -8,8 +8,12 @@ const http = require('http');
 const { ActivityType } = require('discord.js');
 const { sendCustomToAll, sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { cleanDms, scanAndCleanDms } = require('./dm-store');
-const { getGuildMemory, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } = require('./memory');
-const { getState, getActiveVoiceCount, getActiveGuildIds } = require('./state');
+const { getGuildMemory, getGuildMessagesRaw, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } = require('./memory');
+const { getGuildStatsRaw } = require('./stats');
+const { getState, getActiveVoiceCount, getActiveGuildIds, getCommandCooldownMs, setCommandCooldownMs } = require('./state');
+const { clearLogFile, getLogLevel, setLogLevel } = require('./logger');
+const { getMaintenance, setMaintenance } = require('./runtime-flags');
+const { deployCommands, getButtonCooldownMs, setButtonCooldownMs } = require('./commands');
 
 const ACTIVITY_TYPES = {
   Playing:   ActivityType.Playing,
@@ -82,6 +86,57 @@ function startInternalServer(client, port = 3001) {
         return send(200, { ok: true });
       }
 
+      // ── GET/POST /maintenance ─────────────────────────────────
+      if (req.method === 'GET' && req.url === '/maintenance') {
+        return send(200, getMaintenance());
+      }
+      if (req.method === 'POST' && req.url === '/maintenance') {
+        const { enabled, message } = await readBody(req);
+        return send(200, setMaintenance(enabled, message));
+      }
+
+      // ── POST /deploy-commands ─────────────────────────────────
+      if (req.method === 'POST' && req.url === '/deploy-commands') {
+        try {
+          await deployCommands(client);
+          return send(200, { ok: true });
+        } catch (err) {
+          return send(500, { ok: false, error: err.message || 'Deploy failed' });
+        }
+      }
+
+      // ── GET/POST /cooldowns ────────────────────────────────────
+      if (req.method === 'GET' && req.url === '/cooldowns') {
+        return send(200, {
+          commandCooldownMs: getCommandCooldownMs(),
+          buttonCooldownMs: getButtonCooldownMs()
+        });
+      }
+      if (req.method === 'POST' && req.url === '/cooldowns') {
+        const { commandCooldownMs, buttonCooldownMs } = await readBody(req);
+        if (commandCooldownMs !== undefined) setCommandCooldownMs(commandCooldownMs);
+        if (buttonCooldownMs !== undefined) setButtonCooldownMs(buttonCooldownMs);
+        return send(200, {
+          commandCooldownMs: getCommandCooldownMs(),
+          buttonCooldownMs: getButtonCooldownMs()
+        });
+      }
+
+      // ── GET/POST /log-level ────────────────────────────────────
+      if (req.method === 'GET' && req.url === '/log-level') {
+        return send(200, { level: getLogLevel() });
+      }
+      if (req.method === 'POST' && req.url === '/log-level') {
+        const { level } = await readBody(req);
+        return send(200, { level: setLogLevel(level) });
+      }
+
+      // ── POST /logs/bot/clear ─────────────────────────────────
+      if (req.method === 'POST' && req.url === '/logs/bot/clear') {
+        const ok = clearLogFile();
+        return send(ok ? 200 : 500, { ok });
+      }
+
       // ── POST /clean-dms ──────────────────────────────────────
       if (req.method === 'POST' && req.url === '/clean-dms') {
         const result = await cleanDms(client);
@@ -122,6 +177,14 @@ function startInternalServer(client, port = 3001) {
         if (req.method === 'GET' && sub === '/settings') {
           const mem = getGuildMemory(guildId);
           return send(200, { settings: mem?.settings || {} });
+        }
+
+        if (req.method === 'GET' && sub === '/data') {
+          return send(200, {
+            memory: getGuildMemory(guildId),
+            stats: getGuildStatsRaw(guildId),
+            messages: getGuildMessagesRaw(guildId)
+          });
         }
 
         if (req.method === 'POST' && sub === '/reset-memory') {

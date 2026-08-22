@@ -8,8 +8,14 @@
 const guildState = new Map();
 
 // timings (same as old code)
-const COOLDOWN_MS = 5000;
+let COOLDOWN_MS = 5000;
 const INACTIVITY_MS = 5 * 60 * 1000;
+
+function getCommandCooldownMs() { return COOLDOWN_MS; }
+function setCommandCooldownMs(ms) {
+  if (Number.isFinite(ms) && ms >= 0) COOLDOWN_MS = Math.min(ms, 60000);
+  return COOLDOWN_MS;
+}
 
 /**
  * Get or create guild state
@@ -149,6 +155,8 @@ function clearState(guildId) {
 module.exports = {
   getState,
   checkCooldown,
+  getCommandCooldownMs,
+  setCommandCooldownMs,
   clearInactivity,
   armInactivity,
   getInactivityRemaining,

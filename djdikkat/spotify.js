@@ -47,8 +47,10 @@ function parseSpotifyUrl(url) {
 async function getToken() {
   const now = Date.now();
   if (tokenCache.accessToken && tokenCache.expiresAt > now + 30_000) {
+    console.debug('[SPOTIFY] using cached token');
     return tokenCache.accessToken;
   }
+  console.debug('[SPOTIFY] fetching fresh token');
 
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
     throw new Error("Failed to get Spotify API key!");
@@ -105,19 +107,29 @@ function trackToQuery(track) {
 async function resolveSpotifyTracks(url, limit = 3) {
   let parsed = parseSpotifyUrl(url);
   if (!parsed && /^https?:\/\/spotify\.link\//i.test(url)) {
+    console.debug(`[SPOTIFY] resolving short link: ${url}`);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
       const res = await fetch(url, { redirect: 'follow', signal: controller.signal })
         .finally(() => clearTimeout(timeout));
       parsed = parseSpotifyUrl(res.url);
-    } catch {}
+      console.debug(`[SPOTIFY] short link resolved to: ${res.url}`);
+    } catch (err) {
+      console.debug(`[SPOTIFY] short link resolution failed: ${err.message}`);
+    }
   }
-  if (!parsed) return [];
+  if (!parsed) {
+    console.debug(`[SPOTIFY] could not parse URL: ${url}`);
+    return [];
+  }
+  console.debug(`[SPOTIFY] parsed as type=${parsed.type} id=${parsed.id}`);
 
   if (parsed.type === 'track') {
     const track = await spotifyGet(`/tracks/${parsed.id}`);
-    return [trackToQuery(track)].filter(Boolean);
+    const query = trackToQuery(track);
+    console.debug(`[SPOTIFY] track query: "${query}"`);
+    return [query].filter(Boolean);
   }
 
   if (parsed.type === 'album') {
@@ -134,6 +146,7 @@ async function resolveSpotifyTracks(url, limit = 3) {
       next = page?.next || null;
     }
 
+    console.debug(`[SPOTIFY] album "${album?.name || parsed.id}" resolved ${Math.min(out.length, limit)}/${out.length} tracks`);
     return out.slice(0, limit);
   }
 
@@ -151,6 +164,7 @@ async function resolveSpotifyTracks(url, limit = 3) {
       }
       next = page?.next || null;
     }
+    console.debug(`[SPOTIFY] playlist ${parsed.id} resolved ${out.length} track queries`);
     return out;
   }
 

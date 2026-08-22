@@ -18,11 +18,26 @@ const C = TTY ? {
   gray:   '\x1b[90m',
   red:    '\x1b[31m',
   yellow: '\x1b[33m',
-} : { reset: '', gray: '', red: '', yellow: '' };
+  magenta:'\x1b[35m',
+} : { reset: '', gray: '', red: '', yellow: '', magenta: '' };
 
 const _log   = console.log.bind(console);
 const _warn  = console.warn.bind(console);
 const _error = console.error.bind(console);
+const _debug = console.debug ? console.debug.bind(console) : _log;
+
+// ── Log level ─────────────────────────────────────────────────
+// quiet   = errors/warnings only
+// normal  = + routine info logs (default, current behavior)
+// verbose = + detailed console.debug() diagnostics from specific subsystems
+let LOG_LEVEL = 'normal';
+const LOG_LEVELS = new Set(['quiet', 'normal', 'verbose']);
+
+function getLogLevel() { return LOG_LEVEL; }
+function setLogLevel(level) {
+  if (LOG_LEVELS.has(level)) LOG_LEVEL = level;
+  return LOG_LEVEL;
+}
 
 // ── File output ───────────────────────────────────────────────
 const LOG_FILE    = process.env.BOT_LOG_FILE || path.join(__dirname, 'data', 'bot.log');
@@ -68,10 +83,34 @@ function fmt(...args) {
   }).join(' ');
 }
 
-// Patch console methods — each writes to stdout AND the log file
-console.log   = (...a) => { const l = `${ts()} ${fmt(...a)}`;                        _log(l);   writeFile(l); };
+// Patch console methods — each writes to stdout AND the log file.
+// warn/error always fire regardless of level; log/debug are level-gated.
+console.log   = (...a) => {
+  if (LOG_LEVEL === 'quiet') return;
+  const l = `${ts()} ${fmt(...a)}`; _log(l); writeFile(l);
+};
 console.warn  = (...a) => { const l = `${ts()} ${C.yellow}${fmt(...a)}${C.reset}`;   _warn(l);  writeFile(l); };
 console.error = (...a) => { const l = `${ts()} ${C.red}${fmt(...a)}${C.reset}`;      _error(l); writeFile(l); };
+console.debug = (...a) => {
+  if (LOG_LEVEL !== 'verbose') return;
+  const l = `${ts()} ${C.magenta}🔍 ${fmt(...a)}${C.reset}`; _debug(l); writeFile(l);
+};
+
+// ── Clear log file ────────────────────────────────────────────
+// Truncates in place (safe even with _logStream open in append mode —
+// writes seek to EOF on each call) so the bot never has to reopen the stream.
+function clearLogFile() {
+  try {
+    if (fs.existsSync(LOG_FILE)) fs.truncateSync(LOG_FILE, 0);
+    const rotated = `${LOG_FILE}.1`;
+    if (fs.existsSync(rotated)) fs.unlinkSync(rotated);
+    _writeCount = 0;
+    return true;
+  } catch (err) {
+    _error(`Failed to clear log file: ${err.message}`);
+    return false;
+  }
+}
 
 // ── Heartbeat ─────────────────────────────────────────────────
 function formatUptime(ms) {
@@ -93,4 +132,4 @@ function startHeartbeat(client, getActiveVoiceCount) {
   }, 10 * 60 * 1000);
 }
 
-module.exports = { startHeartbeat };
+module.exports = { startHeartbeat, clearLogFile, getLogLevel, setLogLevel };

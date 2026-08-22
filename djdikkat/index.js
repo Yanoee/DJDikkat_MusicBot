@@ -17,8 +17,8 @@ const { Shoukaku, Connectors } = require('shoukaku');
 const pkg = { version: '4.0.0', description: 'DJ DIKKAT' };
 
 const { handleInteraction, deployCommands } = require('./commands');
-const { getState, getActiveVoiceCount } = require('./state');
-const { disconnectGuild } = require('./player');
+const { getState, getActiveVoiceCount, getActiveGuildIds } = require('./state');
+const { disconnectGuild, handlePlayerFailure } = require('./player');
 const { sendAnnouncement, sendOwnerWelcome } = require('./announcement');
 const { startInternalServer } = require('./internal-server');
 const { getAllSavedUiMessages, clearUiMessage, getAllSavedStatsMessages, clearStatsMessage } = require('./memory');
@@ -77,7 +77,20 @@ shoukaku.on('ready', (nodeName) => {
 shoukaku.on('disconnect', (nodeName, code, reason) => {
   console.warn(`⚠️ NodeLink node disconnected: ${nodeName} (${code}) ${reason || ''}`);
   client.nodelinkReadyNodes.delete(nodeName);
+  recoverActiveGuilds();
 });
+
+// When the node itself drops, every guild's player session on it is dead too —
+// sweep them so they self-heal instead of silently failing on the next command.
+function recoverActiveGuilds() {
+  const guildIds = getActiveGuildIds();
+  if (!guildIds.length) return;
+  console.warn(`⚠️ Sweeping ${guildIds.length} active guild(s) for player recovery`);
+  for (const guildId of guildIds) {
+    handlePlayerFailure(guildId, { reconnect: true }).catch(err =>
+      console.error(`[NODE RECOVERY] guild ${guildId} failed:`, err));
+  }
+}
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection', reason);
@@ -220,7 +233,9 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
   // only humans count
   const humans = channel.members.filter(m => !m.user.bot);
+  console.debug(`[VOICE] guild=${guild.id} channel=${channel.id} humans=${humans.size}`);
   if (humans.size === 0) {
+    console.debug(`[VOICE] guild=${guild.id} — last human left, disconnecting`);
     await disconnectGuild(guild.id);
   }
 });

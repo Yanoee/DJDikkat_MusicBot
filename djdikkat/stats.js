@@ -180,6 +180,10 @@ async function recordPlay(guildId, { title, uri, userId, userTag }) {
   scheduleStatsWrite(guildId);
 }
 
+function getGuildStatsRaw(guildId) {
+  return loadStats(guildId);
+}
+
 function getStatsSnapshot(guildId) {
   const stats  = loadStats(guildId);
   const today  = stats.daily[todayKey()] || { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
@@ -218,6 +222,7 @@ function topUsers(map, limit = 3) {
 
 module.exports = {
   recordPlay,
+  getGuildStatsRaw,
   getStatsSnapshot,
   getStatsMeta,
   topFromMap,

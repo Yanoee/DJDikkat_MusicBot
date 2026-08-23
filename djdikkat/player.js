@@ -19,6 +19,7 @@ const {
 } = require('./ui');
 const { recordHistory, getStatsMessage, clearStatsMessage } = require('./memory');
 const { recordPlay } = require('./stats');
+const { UserError, AppError, ErrorCodes, logError } = require('./errors');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
@@ -90,7 +91,7 @@ async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
       name: n.name,
       state: n.state
     }));
-    console.error('NodeLink node not ready after wait.', nodes);
+    logError(new AppError(ErrorCodes.NODELINK_UNAVAILABLE, 'NodeLink node not ready after wait', { nodes }));
   } else {
     console.debug(`[NODE] picked node "${node.name}" after ${Date.now() - start}ms`);
   }
@@ -141,18 +142,35 @@ function ensurePlayerHandlers(guildId, state) {
     state.onPlayerClosed = (closeEvent) => {
       console.warn(`[VOICE CLOSED] guild=${guildId} code=${closeEvent?.code} reason=${closeEvent?.reason || 'unknown'}`);
       handlePlayerFailure(guildId, { reconnect: true }).catch(err =>
-        console.error(`[VOICE CLOSED] recovery failed for guild ${guildId}:`, err));
+        logError(new AppError(ErrorCodes.RECOVERY_FAILED, 'Recovery attempt crashed unexpectedly', { guildId }, err)));
     };
   }
 
   if (!state.onPlayerException) {
     state.onPlayerException = async (exceptionEvent) => {
-      console.error(`[TRACK EXCEPTION] guild=${guildId}`, exceptionEvent?.exception || exceptionEvent);
+      logError(new AppError(ErrorCodes.TRACK_EXCEPTION, 'Track failed to load/play', {
+        guildId, exception: exceptionEvent?.exception || exceptionEvent
+      }));
       if (state.disconnecting || !state.player) return;
       const previous = state.current;
       if (previous) state.lastPlayed = { title: previous.info?.title, uri: previous.info?.uri };
       state.current = null;
       state.paused = false;
+      await playNext(guildId, state.client);
+    };
+  }
+
+  if (!state.onPlayerStuck) {
+    state.onPlayerStuck = async (stuckEvent) => {
+      logError(new AppError(ErrorCodes.TRACK_STUCK, 'Track playback stuck', {
+        guildId, thresholdMs: stuckEvent?.thresholdMs ?? null, track: state.current?.info?.title || null
+      }));
+      if (state.disconnecting || !state.player) return;
+      const previous = state.current;
+      if (previous) state.lastPlayed = { title: previous.info?.title, uri: previous.info?.uri };
+      state.current = null;
+      state.paused = false;
+      await state.player.stopTrack().catch(() => {});
       await playNext(guildId, state.client);
     };
   }
@@ -164,6 +182,7 @@ function attachPlayerListeners(guildId, state) {
   state.player.on('end', state.onPlayerEnd);
   state.player.on('closed', state.onPlayerClosed);
   state.player.on('exception', state.onPlayerException);
+  state.player.on('stuck', state.onPlayerStuck);
   state.playerListenerTarget = state.player;
 }
 
@@ -191,6 +210,7 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
   if (state.onPlayerEnd)       deadPlayer.removeListener('end', state.onPlayerEnd);
   if (state.onPlayerClosed)    deadPlayer.removeListener('closed', state.onPlayerClosed);
   if (state.onPlayerException) deadPlayer.removeListener('exception', state.onPlayerException);
+  if (state.onPlayerStuck)     deadPlayer.removeListener('stuck', state.onPlayerStuck);
 
   state.player = null;
   state.playerListenerTarget = null;
@@ -216,7 +236,16 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
 
   for (let attempt = 1; attempt <= RECONNECT_ATTEMPT_DELAYS_MS.length; attempt++) {
     await delay(RECONNECT_ATTEMPT_DELAYS_MS[attempt - 1] + Math.random() * RECONNECT_JITTER_MS);
-    if (state.player || state.disconnecting) return;
+
+    // Something else (manual /disconnect, the idle card's disconnect button, a
+    // fresh /play) may have torn this guild's state down or already reconnected
+    // it while we were waiting — bail out instead of touching a stale/orphaned
+    // state object. getState(guildId) !== state catches disconnectGuild() having
+    // deleted and re-created this guild's state entry out from under us.
+    if (state.player || state.disconnecting || !state.client || getState(guildId) !== state) {
+      console.debug(`[RECOVERY] guild=${guildId} — state changed underneath us, aborting recovery`);
+      return;
+    }
 
     const guild   = state.client.guilds.cache.get(guildId);
     const channel = guild?.channels.cache.get(state.voiceChannelId);
@@ -250,7 +279,11 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
     }
   }
 
-  console.error(`[RECOVERY] Gave up on guild ${guildId} after ${RECONNECT_ATTEMPT_DELAYS_MS.length} attempts — likely a NodeLink-side crash loop (check journalctl -u nodelink around this time).`);
+  logError(new AppError(
+    ErrorCodes.RECOVERY_FAILED,
+    `Gave up reconnecting after ${RECONNECT_ATTEMPT_DELAYS_MS.length} attempts — likely a NodeLink-side crash loop (check journalctl -u nodelink around this time)`,
+    { guildId }
+  ));
 }
 
 /**
@@ -265,24 +298,26 @@ async function ensurePlayer(interaction) {
     const member = await interaction.guild.members.fetch(interaction.user.id);
     const memberChannelId = member.voice?.channel?.id || null;
     if (state.voiceChannelId && memberChannelId && state.voiceChannelId !== memberChannelId) {
-      throw new Error('Bot is already active in another voice channel.');
+      throw new UserError('Bot is already active in another voice channel.');
     }
     if (!memberChannelId) {
-      throw new Error('Join the bot voice channel first.');
+      throw new UserError('Join the bot voice channel first.');
     }
     return state.player;
   }
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
   if (!member.voice.channel) {
-    throw new Error('Join a voice channel first.');
+    throw new UserError('Join a voice channel first.');
   }
 
   state.voiceChannelId = member.voice.channel.id;
   state.client = interaction.client;
 
   const node = await waitForNode(interaction.client);
-  if (!node) throw new Error('NodeLink not ready.');
+  if (!node) {
+    throw new AppError(ErrorCodes.NODELINK_UNAVAILABLE, 'NodeLink is not available right now — please try again in a moment.', { guildId });
+  }
 
   try {
     state.player = await interaction.client.shoukaku.joinVoiceChannel({
@@ -465,6 +500,7 @@ async function disconnectGuild(guildId) {
       if (state.onPlayerEnd)       state.player.removeListener('end', state.onPlayerEnd);
       if (state.onPlayerClosed)    state.player.removeListener('closed', state.onPlayerClosed);
       if (state.onPlayerException) state.player.removeListener('exception', state.onPlayerException);
+      if (state.onPlayerStuck)     state.player.removeListener('stuck', state.onPlayerStuck);
       await state.player.stopTrack().catch(() => {});
       await state.player.disconnect().catch(() => {});
     }

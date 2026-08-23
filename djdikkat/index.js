@@ -60,7 +60,17 @@ const shoukaku = new Shoukaku(
     url: `${NODELINK_HOST}:${NODELINK_PORT}`,
     auth: NODELINK_PASSWORD,
     secure: NODELINK_SECURE === 'true'
-  }]
+  }],
+  {
+    // Shoukaku's defaults (3 tries × 5s = ~15s total) can be exhausted before
+    // NodeLink finishes a cold boot (40+ sources, now 2 workers) if the bot
+    // and NodeLink ever restart around the same time — the node then sits in
+    // DISCONNECTED with no further automatic retry until the bot itself is
+    // restarted. Wider budget so a coincidental simultaneous restart recovers
+    // on its own instead of needing a manual intervention.
+    reconnectTries: 10,
+    reconnectInterval: 5
+  }
 );
 
 client.shoukaku = shoukaku;

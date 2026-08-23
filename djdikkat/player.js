@@ -99,6 +99,48 @@ async function waitForNode(client, timeoutMs = 2000, intervalMs = 200) {
 }
 
 /**
+ * Releases a guild's voice connection WITHOUT ever touching NodeLink over
+ * REST. Two separate things need to happen, and Shoukaku's leaveVoiceChannel()
+ * bundles a third one we must avoid:
+ *   1. Tell Discord's gateway we've actually left (Connection#disconnect()).
+ *      Without this, Discord still thinks we're connected to that channel and
+ *      won't send a fresh VOICE_SERVER_UPDATE on the next join — Shoukaku's
+ *      Connection#connect() then just hangs waiting for an event that's never
+ *      coming, until it times out ("voice connection is not established in
+ *      15 seconds"). This bit NEVER touches NodeLink.
+ *   2. Clear Shoukaku's own client-side `connections`/`players` Maps (public,
+ *      mutable — just can't be reassigned wholesale) so the next
+ *      joinVoiceChannel() doesn't throw "existing connection".
+ * What we deliberately never do: call player.destroy() / leaveVoiceChannel()'s
+ * REST DELETE. NodeLink transparently reassigns an existing-but-unassigned
+ * player to a fresh worker after a crash ("will be reassigned on next
+ * request"), but does NOT recreate one that's been explicitly deleted — every
+ * PATCH after that delete 404s with "Player not found" forever.
+ */
+function softReleaseConnection(client, guildId) {
+  const conn = client?.shoukaku?.connections?.get(guildId);
+  if (conn?.disconnect) conn.disconnect();
+  client?.shoukaku?.connections?.delete(guildId);
+  client?.shoukaku?.players?.delete(guildId);
+}
+
+/**
+ * Joins voice, trying a clean join first. Falls back to softReleaseConnection
+ * + retry if Shoukaku's client-side state still blocks the join.
+ */
+async function joinVoiceChannelSafely(client, guildId, channelId, shardId) {
+  const opts = { guildId, channelId, shardId: shardId ?? 0, deaf: true };
+  try {
+    return await client.shoukaku.joinVoiceChannel(opts);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('existing connection')) throw err;
+    softReleaseConnection(client, guildId);
+    return client.shoukaku.joinVoiceChannel(opts);
+  }
+}
+
+/**
  * Create (once) and attach the end/closed/exception listeners for a guild's player.
  * closed  = Discord voice websocket dropped (node crash, session invalidated, etc.)
  * exception = track failed to load/play
@@ -217,9 +259,9 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
   state.current = null;
   state.paused = false;
 
-  if (state.client?.shoukaku?.leaveVoiceChannel) {
-    await state.client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
-  }
+  // Release the connection Discord's-gateway-side + locally, but never touch
+  // NodeLink over REST — see softReleaseConnection for why both halves matter.
+  if (state.client) softReleaseConnection(state.client, guildId);
 
   await upsertController(guildId, state);
 
@@ -260,16 +302,7 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
       const node = await waitForNode(client, RECONNECT_NODE_WAIT_MS);
       if (!node || state.player) return;
 
-      // Clears any partial connection state left behind by a previous failed
-      // attempt in this loop, so this join doesn't fail on "existing connection".
-      await client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
-
-      state.player = await client.shoukaku.joinVoiceChannel({
-        guildId,
-        channelId: state.voiceChannelId,
-        shardId: guild.shardId ?? 0,
-        deaf: true
-      });
+      state.player = await joinVoiceChannelSafely(client, guildId, state.voiceChannelId, guild.shardId);
       attachPlayerListeners(guildId, state);
       console.log(`[RECOVERY] Rejoined voice for guild ${guildId} on attempt ${attempt}/${RECONNECT_ATTEMPT_DELAYS_MS.length}, resuming queue`);
       await playNext(guildId, client);
@@ -319,28 +352,7 @@ async function ensurePlayer(interaction) {
     throw new AppError(ErrorCodes.NODELINK_UNAVAILABLE, 'NodeLink is not available right now — please try again in a moment.', { guildId });
   }
 
-  try {
-    state.player = await interaction.client.shoukaku.joinVoiceChannel({
-      guildId,
-      channelId: state.voiceChannelId,
-      shardId: interaction.guild.shardId ?? 0,
-      deaf: true
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('existing connection') && interaction.client?.shoukaku?.leaveVoiceChannel) {
-      console.debug(`[VOICE] guild=${guildId} had a stale connection — leaving and rejoining`);
-      await interaction.client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
-      state.player = await interaction.client.shoukaku.joinVoiceChannel({
-        guildId,
-        channelId: state.voiceChannelId,
-        shardId: interaction.guild.shardId ?? 0,
-        deaf: true
-      });
-    } else {
-      throw err;
-    }
-  }
+  state.player = await joinVoiceChannelSafely(interaction.client, guildId, state.voiceChannelId, interaction.guild.shardId);
 
   console.debug(`[VOICE] guild=${guildId} joined channel=${state.voiceChannelId}`);
   attachPlayerListeners(guildId, state);

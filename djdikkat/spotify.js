@@ -6,6 +6,8 @@
  * Author: Yanoee
  ************************************************************/
 
+const { AppError, ErrorCodes } = require('./errors');
+
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || process.env.SPOTIFY_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || process.env.SPOTIFY_SECRET;
 
@@ -53,7 +55,7 @@ async function getToken() {
   console.debug('[SPOTIFY] fetching fresh token');
 
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-    throw new Error("Failed to get Spotify API key!");
+    throw new AppError(ErrorCodes.SPOTIFY_ERROR, 'Spotify credentials are not configured');
   }
 
   const body = new URLSearchParams({
@@ -75,7 +77,7 @@ async function getToken() {
   }).finally(() => clearTimeout(timeout));
 
   if (!res.ok) {
-    throw new Error(`Spotify token error: ${res.status}. Check client id/secret.`);
+    throw new AppError(ErrorCodes.SPOTIFY_ERROR, `Spotify token request failed (HTTP ${res.status}) — check client id/secret`, { status: res.status });
   }
 
   const data = await res.json();
@@ -93,7 +95,7 @@ async function spotifyGet(path) {
     signal: controller.signal
   }).finally(() => clearTimeout(timeout));
   if (!res.ok) {
-    throw new Error(`Spotify API error: ${res.status}`);
+    throw new AppError(ErrorCodes.SPOTIFY_ERROR, `Spotify API request failed (HTTP ${res.status})`, { status: res.status, path });
   }
   return res.json();
 }

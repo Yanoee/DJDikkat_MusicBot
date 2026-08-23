@@ -48,6 +48,7 @@ const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 const { sendAnnouncement } = require('./announcement');
 const { trackDm } = require('./dm-store');
 const { getMaintenance } = require('./runtime-flags');
+const { UserError, logError } = require('./errors');
 
 let BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
@@ -371,8 +372,8 @@ async function handleInteraction(interaction) {
           try {
             queries = await resolveSpotifyTracks(query, 25);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return interaction.editReply(`❌ Spotify error: ${msg}`);
+            const appErr = logError(err, { guildId });
+            return interaction.editReply(`❌ Spotify error (ref: ${appErr.ref}). Try again in a moment, or paste a direct YouTube link instead.`);
           }
 
           if (!queries.length) {
@@ -858,10 +859,13 @@ async function handleInteraction(interaction) {
       }
     }
   } catch (err) {
-    console.error('❌ Command error:', err);
-    const message = err instanceof Error ? err.message : 'Something went wrong';
+    if (err instanceof UserError) {
+      try { await replyEphemeral(interaction, err.message); } catch {}
+      return;
+    }
+    const appErr = logError(err, { guildId: interaction.guildId, command: interaction.commandName || interaction.customId });
     try {
-      await replyEphemeral(interaction, message);
+      await replyEphemeral(interaction, `❌ Something went wrong (ref: ${appErr.ref}). Try again in a moment.`);
     } catch {}
   }
 }

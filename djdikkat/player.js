@@ -24,6 +24,30 @@ const { UserError, AppError, ErrorCodes, logError } = require('./errors');
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
+// ── Per-guild recovery-attempt tracking ─────────────────────────
+// Lives independently of guild state (which gets replaced wholesale on
+// disconnect) so a burst of failures is still visible on the Servers page
+// even after the guild's own state object has been torn down and recreated.
+const RECOVERY_WINDOW_MS = 60 * 60 * 1000;
+const recoveryAttempts = new Map(); // guildId -> timestamps[]
+
+function recordRecoveryAttempt(guildId) {
+  const cutoff = Date.now() - RECOVERY_WINDOW_MS;
+  const list = (recoveryAttempts.get(guildId) || []).filter(t => t > cutoff);
+  list.push(Date.now());
+  recoveryAttempts.set(guildId, list);
+}
+
+function getRecoveryStats() {
+  const cutoff = Date.now() - RECOVERY_WINDOW_MS;
+  const stats = {};
+  for (const [guildId, timestamps] of recoveryAttempts) {
+    const recent = timestamps.filter(t => t > cutoff);
+    if (recent.length) stats[guildId] = recent.length;
+  }
+  return stats;
+}
+
 async function updateVoiceChannelStatus(state, text) {
   if (!state.voiceChannelId || !DISCORD_TOKEN) return;
   try {
@@ -239,6 +263,7 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
   if (state.disconnecting || !state.player) return;
 
   console.warn(`[VOICE LOST] guild=${guildId} — resetting player${reconnect ? ' and attempting recovery' : ''}`);
+  recordRecoveryAttempt(guildId);
 
   clearInactivity(state);
 
@@ -312,9 +337,39 @@ async function handlePlayerFailure(guildId, { reconnect = false } = {}) {
     }
   }
 
+  // Last resort. NodeLink's own "unassigned, will be reassigned on next
+  // request" mechanism has been observed in production to NOT reliably
+  // reassign — PATCH kept 404ing with "Player not found" across all 3 gentle
+  // attempts above even when we never sent it a delete. A full teardown +
+  // fresh player creation is a different NodeLink code path — the one every
+  // normal /play already uses successfully — so it's worth one real attempt
+  // before conceding, even though it's the destructive path we otherwise avoid.
+  if (state.player || state.disconnecting || !state.client || getState(guildId) !== state) return;
+  const lastGuild   = state.client.guilds.cache.get(guildId);
+  const lastChannel = lastGuild?.channels.cache.get(state.voiceChannelId);
+  const lastHumans  = lastChannel?.members?.filter(m => !m.user.bot);
+  if (lastChannel && lastHumans && lastHumans.size > 0) {
+    try {
+      const client = state.client;
+      const node = await waitForNode(client, RECONNECT_NODE_WAIT_MS);
+      if (node && !state.player) {
+        await client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
+        state.player = await client.shoukaku.joinVoiceChannel({
+          guildId, channelId: state.voiceChannelId, shardId: lastGuild.shardId ?? 0, deaf: true
+        });
+        attachPlayerListeners(guildId, state);
+        console.log(`[RECOVERY] Rejoined guild ${guildId} via full recreate (last resort), resuming queue`);
+        await playNext(guildId, client);
+        return;
+      }
+    } catch (err) {
+      console.warn(`[RECOVERY] Last-resort full recreate also failed for guild ${guildId}: ${err.message}`);
+    }
+  }
+
   logError(new AppError(
     ErrorCodes.RECOVERY_FAILED,
-    `Gave up reconnecting after ${RECONNECT_ATTEMPT_DELAYS_MS.length} attempts — likely a NodeLink-side crash loop (check journalctl -u nodelink around this time)`,
+    `Gave up reconnecting after ${RECONNECT_ATTEMPT_DELAYS_MS.length} gentle attempts + one full recreate — likely a NodeLink-side bug in its worker-crash player reassignment (check journalctl -u nodelink around this time)`,
     { guildId }
   ));
 }
@@ -566,7 +621,8 @@ module.exports = {
   stopPlayback,
   clearQueue,
   disconnectGuild,
-  handlePlayerFailure
+  handlePlayerFailure,
+  getRecoveryStats
 };
 
 

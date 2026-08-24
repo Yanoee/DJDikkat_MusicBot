@@ -324,10 +324,15 @@ async function canControlPlayback(interaction, state) {
 // ================= INTERACTION HANDLER =================
 
 async function handleInteraction(interaction) {
+  const _t0 = Date.now();
+  let _label = null;
+  let _outcome = 'ok';
   try {
     /* ---------------- SLASH COMMANDS ---------------- */
     if (interaction.isChatInputCommand()) {
       const { guildId, commandName } = interaction;
+      _label = commandName;
+      console.log(`[CMD] → /${commandName} guild=${guildId} user=${interaction.user?.tag || interaction.user?.id}`);
 
       const cd = checkCooldown(guildId);
       if (cd > 0) {
@@ -650,6 +655,8 @@ async function handleInteraction(interaction) {
 
     /* ---------------- BUTTONS ---------------- */
     if (interaction.isButton()) {
+      _label = interaction.customId;
+      console.debug(`[CMD] → button ${interaction.customId} guild=${interaction.guildId} user=${interaction.user?.tag || interaction.user?.id}`);
       if (interaction.customId && interaction.customId.startsWith('dmremove:')) {
         const parts = interaction.customId.split(':');
         const userId = parts[2];
@@ -860,13 +867,17 @@ async function handleInteraction(interaction) {
     }
   } catch (err) {
     if (err instanceof UserError) {
+      _outcome = 'user-error';
       try { await replyEphemeral(interaction, err.message); } catch {}
       return;
     }
+    _outcome = 'error';
     const appErr = logError(err, { guildId: interaction.guildId, command: interaction.commandName || interaction.customId });
     try {
       await replyEphemeral(interaction, `❌ Something went wrong (ref: ${appErr.ref}). Try again in a moment.`);
     } catch {}
+  } finally {
+    if (_label) console.debug(`[CMD] ← ${_label} ${_outcome} (${Date.now() - _t0}ms)`);
   }
 }
 

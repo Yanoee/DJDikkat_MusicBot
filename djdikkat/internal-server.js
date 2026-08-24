@@ -42,6 +42,8 @@ function startInternalServer(client, port = 3001) {
     const handle = async () => {
       // ── GET /guilds ──────────────────────────────────────────
       if (req.method === 'GET' && req.url === '/guilds') {
+        const { getRecoveryStats } = require('./player');
+        const recoveryStats = getRecoveryStats();
         const guilds = [...client.guilds.cache.values()].map(g => {
           const state = getState(g.id);
           return {
@@ -51,7 +53,8 @@ function startInternalServer(client, port = 3001) {
             playing: !!state.current,
             paused: state.paused || false,
             currentTrack: state.current?.info?.title || null,
-            voiceChannelId: state.voiceChannelId || null
+            voiceChannelId: state.voiceChannelId || null,
+            recoveryAttempts1h: recoveryStats[g.id] || 0
           };
         }).sort((a, b) => a.name.localeCompare(b.name));
         return send(200, { guilds, total: guilds.length });

@@ -334,6 +334,12 @@ async function handleInteraction(interaction) {
       _label = commandName;
       console.log(`[CMD] → /${commandName} guild=${guildId} user=${interaction.user?.tag || interaction.user?.id}`);
 
+      const maintenance = getMaintenance();
+      if (maintenance.enabled) {
+        _outcome = 'maintenance';
+        return interaction.reply({ content: maintenance.message, flags: MessageFlags.Ephemeral });
+      }
+
       const cd = checkCooldown(guildId);
       if (cd > 0) {
         return interaction.reply({
@@ -353,10 +359,6 @@ async function handleInteraction(interaction) {
 
       /* 🎵 PLAY */
       if (commandName === 'play') {
-        const maintenance = getMaintenance();
-        if (maintenance.enabled) {
-          return interaction.reply({ content: maintenance.message, flags: MessageFlags.Ephemeral });
-        }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const query = interaction.options.getString('query', true);
@@ -746,6 +748,16 @@ async function handleInteraction(interaction) {
       const [prefix, action, guildId] = interaction.customId.split(':');
       if (prefix !== 'music') return;
 
+      // Only the playback-control buttons (toggle/skip/replay/stop/disconnect/
+      // etc.) are gated — DM opt-out, memory reset, and pagination buttons
+      // above this point aren't "using the bot" in the playback sense and
+      // should keep working during maintenance.
+      const maintenance = getMaintenance();
+      if (maintenance.enabled) {
+        _outcome = 'maintenance';
+        return interaction.reply({ content: maintenance.message, flags: MessageFlags.Ephemeral });
+      }
+
       const state = getState(guildId);
       if (!await canControlPlayback(interaction, state)) return;
       const cd = getButtonCooldownRemaining(state, interaction.user.id);
@@ -825,10 +837,6 @@ async function handleInteraction(interaction) {
       }
 
       if (action === 'replay') {
-        const maintenance = getMaintenance();
-        if (maintenance.enabled) {
-          return interaction.followUp({ content: maintenance.message, flags: MessageFlags.Ephemeral });
-        }
         state.textChannelId = interaction.channelId;
         if (!state.lastPlayed?.uri && !state.lastPlayed?.title) {
           return interaction.followUp({ content: '❌ Nothing to replay', flags: MessageFlags.Ephemeral });

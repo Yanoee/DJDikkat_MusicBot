@@ -24,6 +24,12 @@ const ACTIVITY_TYPES = {
 
 const ACTIVITY_NAMES = { 0: 'Playing', 2: 'Listening', 3: 'Watching', 5: 'Competing' };
 
+// Snapshot of whatever presence was live right before maintenance mode was
+// switched on, so switching it off restores the exact old title card instead
+// of resetting to some generic default. In-memory only — a restart mid-
+// maintenance loses it, same as the maintenance flag itself.
+let savedPresence = null;
+
 function readBody(req) {
   return new Promise(resolve => {
     let raw = '';
@@ -95,6 +101,37 @@ function startInternalServer(client, port = 3001) {
       }
       if (req.method === 'POST' && req.url === '/maintenance') {
         const { enabled, message } = await readBody(req);
+        const was = getMaintenance().enabled;
+        const now = !!enabled;
+
+        if (now && !was) {
+          // Turning on: snapshot whatever's live right now, then switch to
+          // the maintenance presence (idle = Discord's yellow/away status).
+          const presence = client.user?.presence;
+          const activity = presence?.activities?.[0];
+          savedPresence = {
+            status: presence?.status && presence.status !== 'offline' ? presence.status : 'online',
+            type: activity ? (ACTIVITY_NAMES[activity.type] || null) : null,
+            text: activity?.name || null
+          };
+          await client.user.setPresence({
+            status: 'idle',
+            activities: [{ name: '🔨 Under Maintenance', type: ActivityType.Playing }]
+          }).catch(() => {});
+        } else if (!now && was) {
+          // Turning off: restore exactly what was captured. If there's
+          // nothing saved (e.g. the bot restarted mid-maintenance), leave
+          // presence alone rather than guessing at a default.
+          if (savedPresence) {
+            const presenceData = { status: savedPresence.status, activities: [] };
+            if (savedPresence.text && savedPresence.type && ACTIVITY_TYPES[savedPresence.type] !== undefined) {
+              presenceData.activities = [{ name: savedPresence.text, type: ACTIVITY_TYPES[savedPresence.type] }];
+            }
+            await client.user.setPresence(presenceData).catch(() => {});
+          }
+          savedPresence = null;
+        }
+
         return send(200, setMaintenance(enabled, message));
       }
 

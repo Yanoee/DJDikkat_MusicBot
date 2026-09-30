@@ -1,12 +1,13 @@
 {
   "name": "djdikkat",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "🎵 Dakka Records INC.",
   "type": "module",
   "main": "djdikkat/index.ts",
   "scripts": {
     "start": "node djdikkat/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test djdikkat/*.test.ts"
   },
   "keywords": [
     "discord",

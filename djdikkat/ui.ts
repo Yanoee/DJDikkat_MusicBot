@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Player card
  * The "Now Playing" / idle card and its buttons
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';

@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Errors
  * Structured application errors with codes + correlation IDs
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { randomBytes } from 'node:crypto';

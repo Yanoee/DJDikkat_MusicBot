@@ -2,19 +2,21 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import {
   SlashCommandBuilder, MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   PermissionFlagsBits, InteractionContextType
 } from 'discord.js';
-import type { ButtonInteraction, ChatInputCommandInteraction, Client, Interaction, RepliableInteraction } from 'discord.js';
-import { LoadType } from 'shoukaku';
-import type { LavalinkResponse, Node, Track } from 'shoukaku';
+import type {
+  ApplicationCommandOptionChoiceData, AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, Client, Interaction,
+  RepliableInteraction
+} from 'discord.js';
+import type { Track } from 'shoukaku';
 import { getState, peekState, checkCooldown } from './state.ts';
 import type { GuildState } from './state.ts';
-import { upsertController, truncateQueueTitle, deleteMessage } from './ui.ts';
+import { upsertController, truncateQueueTitle, deleteMessage, formatMs } from './ui.ts';
 import {
   pickNode, ensurePlayer, playNext, togglePause, toggleLoopMode, stopTrack, stopPlayback, clearQueue, disconnectGuild
 } from './player.ts';
@@ -25,7 +27,7 @@ import {
   getHistoryPage, setGuildSettings, resetGuildMemory, resetGuildHistory, resetGuildMessages,
   setStatsMessage, getStatsMessage, clearStatsMessage
 } from './memory.ts';
-import { isSpotifyUrl, resolveSpotifyTracks } from './spotify.ts';
+import { search, suggest, tracksOf, fold, normalizeLink } from './search.ts';
 import { sendAnnouncement } from './announcement.ts';
 import { trackDm } from './dm-store.ts';
 import { getMaintenance } from './runtime-flags.ts';
@@ -115,7 +117,7 @@ const slashCommands = [
   new SlashCommandBuilder()
     .setName('play')
     .setDescription('🎵 Play music (search / YouTube / Spotify / SoundCloud)')
-    .addStringOption(o => o.setName('query').setDescription('Search text, YouTube, Spotify or SoundCloud URL').setRequired(true)),
+    .addStringOption(o => o.setName('query').setDescription('Song name, or a YouTube / Spotify / SoundCloud link').setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder().setName('pause').setDescription('⏯️ Pause / Resume'),
   new SlashCommandBuilder().setName('skip').setDescription('⏭️ Skip current track'),
   new SlashCommandBuilder().setName('queue').setDescription('📜 Show queue'),
@@ -137,89 +139,40 @@ function replyEphemeral(interaction: RepliableInteraction, content: string) {
     : interaction.reply(ephemeral(content));
 }
 
-// ================= SEARCH =================
+// ================= /play SUGGESTIONS =================
+// As the user types, Discord shows the top matches; picking one sends that
+// track's link to /play, so exactly that track plays.
 
-function tracksOf(res: LavalinkResponse | undefined): Track[] {
-  if (!res) return [];
-  switch (res.loadType) {
-    case LoadType.TRACK:    return [res.data];
-    case LoadType.SEARCH:   return res.data;
-    case LoadType.PLAYLIST: return res.data.tracks;
-    default:                return [];
+const SUGGEST_MIN_CHARS = 3;
+const SUGGEST_TIMEOUT_MS = 2500; // Discord drops autocomplete answers after 3s
+const SUGGEST_CACHE_MS = 10 * 60 * 1000;
+const SUGGEST_CACHE_MAX = 500;
+const suggestCache = new Map<string, { at: number; choices: ApplicationCommandOptionChoiceData<string>[] }>();
+
+async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  const typed = interaction.options.getFocused().trim();
+  const key = fold(typed);
+  if (key.length < SUGGEST_MIN_CHARS || normalizeLink(typed)) return interaction.respond([]);
+  const cached = suggestCache.get(key);
+  if (cached && Date.now() - cached.at < SUGGEST_CACHE_MS) return interaction.respond(cached.choices);
+
+  const node = pickNode(interaction.client);
+  if (!node) return interaction.respond([]);
+  const tracks = await Promise.race([
+    suggest(id => node.rest.resolve(id), typed),
+    new Promise<Track[]>(resolve => setTimeout(() => resolve([]), SUGGEST_TIMEOUT_MS))
+  ]);
+  const choices = tracks
+    .filter(t => t.info.uri && t.info.uri.length <= 100)
+    .map(t => ({
+      name: `${t.info.title} — ${t.info.author} (${t.info.isStream ? 'live' : formatMs(t.info.length)})`.slice(0, 100),
+      value: t.info.uri!
+    }));
+  if (choices.length) {
+    if (suggestCache.size >= SUGGEST_CACHE_MAX) suggestCache.delete(suggestCache.keys().next().value!);
+    suggestCache.set(key, { at: Date.now(), choices });
   }
-}
-
-const NEGATIVE_KEYWORDS = ['cover', 'remix', 'karaoke', 'reaction', 'nightcore', 'slowed', 'reverb', 'parody', 'instrumental'];
-
-function scoreTrack(track: Track, queryWords: string[], queryLower: string): number {
-  const title = track.info.title.toLowerCase();
-  const author = track.info.author.toLowerCase();
-  const durationSec = track.info.length / 1000;
-  let score = 0;
-  for (const word of queryWords) {
-    if (title.includes(word)) score += 3;
-    if (word.length >= 3 && author.includes(word)) score += 5;
-  }
-  if (durationSec >= 90 && durationSec <= 600) score += 2;
-  if (/official|audio|lyrics/.test(title)) score += 1;
-  for (const kw of NEGATIVE_KEYWORDS) if (title.includes(kw) && !queryLower.includes(kw)) score -= 4;
-  return score;
-}
-
-function pickBestTrack(candidates: Track[], query: string): { track: Track | null; score: number } {
-  const queryLower = query.toLowerCase();
-  const queryWords = queryLower.split(/\s+/).filter(w => w.length >= 2);
-  let best: Track | null = null;
-  let bestScore = -Infinity;
-  for (const track of candidates) {
-    const score = scoreTrack(track, queryWords, queryLower);
-    console.debug(`[SEARCH] "${query}" candidate: "${track.info.title}" score=${score}`);
-    if (score > bestScore) { best = track; bestScore = score; }
-  }
-  if (best) console.debug(`[SEARCH] "${query}" picked: "${best.info.title}" score=${bestScore}`);
-  return { track: best, score: bestScore };
-}
-
-/** Resolves a /play query to tracks. `room` = how many the queue can still take. */
-async function searchTracks(node: Node, query: string, room: number, guildId: string): Promise<{ tracks: Track[]; liveWarning: boolean }> {
-  const resolve = async (identifier: string) => tracksOf(await node.rest.resolve(identifier));
-
-  if (isSpotifyUrl(query)) {
-    let queries: string[];
-    try {
-      queries = await resolveSpotifyTracks(query, room);
-    } catch (err) {
-      const appErr = logError(err, { guildId });
-      throw new UserError(`❌ Spotify error (ref: ${appErr.ref}). Try again in a moment, or paste a direct YouTube link instead.`);
-    }
-    if (!queries.length) throw new UserError('❌ No Spotify tracks found');
-    const tracks: Track[] = [];
-    for (const q of queries) {
-      const first = (await resolve(`ytmsearch:${q}`))[0] ?? (await resolve(`ytsearch:${q}`))[0];
-      if (first) tracks.push(first);
-    }
-    return { tracks, liveWarning: false };
-  }
-
-  if (query.startsWith('http')) return { tracks: await resolve(query), liveWarning: false };
-
-  // Top candidates from ytmsearch: raw query + "official audio" variant in parallel
-  const [primary, enhanced] = await Promise.all([resolve(`ytmsearch:${query}`), resolve(`ytmsearch:${query} official audio`)]);
-  let { track, score } = pickBestTrack([...primary.slice(0, 5), ...enhanced.slice(0, 3)], query);
-
-  // Low confidence — add ytsearch candidates to the pool and re-pick
-  if (!track || score < 3) {
-    const yt = (await resolve(`ytsearch:${query}`)).slice(0, 5);
-    track = pickBestTrack(track ? [track, ...yt] : yt, query).track;
-  }
-  // Last resort: SoundCloud
-  track ??= pickBestTrack((await resolve(`scsearch:${query}`)).slice(0, 3), query).track;
-  if (!track) return { tracks: [], liveWarning: false };
-
-  // Flag livestreams that weren't explicitly requested
-  const ql = query.toLowerCase();
-  const liveWarning = (track.info.isStream || track.info.length === 0) && !ql.includes('live') && !ql.includes('stream');
-  return { tracks: [track], liveWarning };
+  await interaction.respond(choices);
 }
 
 // ================= HANDLERS =================
@@ -273,7 +226,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction<'cached'>)
     const node = pickNode(interaction.client);
     if (!node) return interaction.editReply('❌ NodeLink not available');
 
-    const { tracks, liveWarning } = await searchTracks(node, query, MAX_QUEUE - state.queue.length, guildId);
+    const { tracks, liveWarning } = await search(id => node.rest.resolve(id), query, MAX_QUEUE - state.queue.length, guildId);
     if (!tracks.length) return interaction.editReply('❌ No results found');
 
     // Re-check: the queue may have filled up while we were searching.
@@ -492,6 +445,10 @@ async function handleButton(interaction: ButtonInteraction): Promise<unknown> {
 // ================= INTERACTION ENTRY =================
 
 export async function handleInteraction(interaction: Interaction): Promise<void> {
+  if (interaction.isAutocomplete()) {
+    await handleAutocomplete(interaction).catch(err => console.debug(`[SUGGEST] failed: ${errMsg(err)}`));
+    return;
+  }
   if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
   const t0 = Date.now();
   const label = interaction.isChatInputCommand() ? interaction.commandName : interaction.customId;

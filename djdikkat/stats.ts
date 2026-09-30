@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats engine
  * Per-guild play counters and rollups, stored in MariaDB
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  *
  * Table:

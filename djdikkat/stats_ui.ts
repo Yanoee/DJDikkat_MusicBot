@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats UI
  * Per-guild stats embed builder
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';

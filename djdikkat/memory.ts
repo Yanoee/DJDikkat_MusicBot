@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Memory store
  * Per-guild storage (history / settings / messages) in MariaDB
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  *
  * Tables:

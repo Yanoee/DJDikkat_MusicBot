@@ -1,13 +1,15 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * Spotify resolver
- * Spotify URL -> "title artist" search queries for NodeLink
- * Build 5.1.0
+ * Spotify URL -> title, artist and duration for the search engine
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { AppError, ErrorCodes, errMsg } from './errors.ts';
 
-interface SpotifyTrack { name?: string; artists?: { name?: string }[] }
+interface SpotifyTrack { name?: string; artists?: { name?: string }[]; duration_ms?: number }
+/** What the search engine needs to find a Spotify track on YouTube. */
+export interface SpotifyTrackSpec { title: string; artist: string; durationMs?: number }
 interface Page<T> { items?: T[]; next?: string | null }
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -70,22 +72,25 @@ async function spotifyGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-const trackToQuery = (t: SpotifyTrack | null | undefined): string =>
-  `${t?.name ?? ''} ${t?.artists?.[0]?.name ?? ''}`.trim();
+const toSpec = (t: SpotifyTrack | null | undefined): SpotifyTrackSpec | null =>
+  t?.name ? { title: t.name, artist: t.artists?.[0]?.name ?? '', durationMs: t.duration_ms } : null;
 
-/** Collects up to `limit` queries from a paginated list, following `next` links. */
-async function collect<T>(first: Page<T> | undefined, map: (item: T) => string, limit: number): Promise<string[]> {
-  const out: string[] = [];
+/** Collects up to `limit` tracks from a paginated list, following `next` links. */
+async function collect<T>(first: Page<T> | undefined, map: (item: T) => SpotifyTrackSpec | null, limit: number): Promise<SpotifyTrackSpec[]> {
+  const out: SpotifyTrackSpec[] = [];
   let page = first;
   while (page && out.length < limit) {
-    out.push(...(page.items ?? []).map(map).filter(Boolean));
+    for (const item of page.items ?? []) {
+      const spec = map(item);
+      if (spec) out.push(spec);
+    }
     page = page.next && out.length < limit ? await spotifyGet<Page<T>>(page.next) : undefined;
   }
   return out.slice(0, limit);
 }
 
-/** Resolves a Spotify track/album/playlist URL to up to `limit` search queries. */
-export async function resolveSpotifyTracks(url: string, limit = 3): Promise<string[]> {
+/** Resolves a Spotify track/album/playlist URL to up to `limit` tracks. */
+export async function resolveSpotifyTracks(url: string, limit = 3): Promise<SpotifyTrackSpec[]> {
   let parsed = parseSpotifyUrl(url);
   if (!parsed && /^https?:\/\/spotify\.link\//i.test(url)) {
     try {
@@ -103,12 +108,13 @@ export async function resolveSpotifyTracks(url: string, limit = 3): Promise<stri
   console.debug(`[SPOTIFY] parsed as type=${parsed.type} id=${parsed.id}`);
 
   if (parsed.type === 'track') {
-    return [trackToQuery(await spotifyGet<SpotifyTrack>(`/tracks/${parsed.id}`))].filter(Boolean);
+    const spec = toSpec(await spotifyGet<SpotifyTrack>(`/tracks/${parsed.id}`));
+    return spec ? [spec] : [];
   }
   if (parsed.type === 'album') {
     const album = await spotifyGet<{ tracks?: Page<SpotifyTrack> }>(`/albums/${parsed.id}`);
-    return collect(album.tracks, trackToQuery, limit);
+    return collect(album.tracks, toSpec, limit);
   }
   const first = await spotifyGet<Page<{ track?: SpotifyTrack }>>(`/playlists/${parsed.id}/tracks?limit=100`);
-  return collect(first, item => trackToQuery(item.track), limit);
+  return collect(first, item => toSpec(item.track), limit);
 }

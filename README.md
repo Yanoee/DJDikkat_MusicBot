@@ -22,6 +22,8 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 ## 🔧 Features
 
 - **Multi-source playback** - Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
+- **Smart search** - `/play` suggests the top matches while you type; pick one to play exactly that track. Plain-text searches trust YouTube Music's ranking, match whole words (Turkish letters optional: `baris manco donence` finds *Dönence*), and skip covers, remixes, live and nightcore versions unless you ask for them.
+- **Clean links** - A video link opened from a Mix or playlist plays just that video. Mobile and `https://`-less links work, and a broken or unsupported link tells you why instead of playing something random.
 - **Spotify support** - Resolves Spotify tracks, albums, and full playlists to YouTube via the Spotify Web API. No Spotify premium account needed on your end.
 - **Interactive player card** - A persistent embed in your text channel with live controls. No need to type commands - everything is a button click.
 - **3-state loop** - Cycles Off ~ Track ~ Queue ~ Off. Toggle any time with the loop button on the player card.
@@ -43,7 +45,7 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 
 | Command | Description |
 |---|---|
-| `/play <query>` | Search by name or paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. Queue cap: 25 tracks. |
+| `/play <query>` | Search by name (with live suggestions) or paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. Queue cap: 25 tracks. |
 | `/pause` | Pause or resume the current track. |
 | `/skip` | Skip the current track immediately. |
 | `/stop` | Stop playback and clear the queue. Bot stays in voice. |
@@ -109,7 +111,7 @@ GRANT ALL PRIVILEGES ON djdikkat.* TO 'djdikkat'@'localhost';
 ```
 
 Add to `djdikkat/.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Tables are created on first start.
-Then `npm install` and `npm start` (reads `djdikkat/.env`). `npm run typecheck` runs the TypeScript compiler without emitting anything.
+Then `npm install` and `npm start` (reads `djdikkat/.env`). `npm run typecheck` runs the TypeScript compiler without emitting anything; `npm test` runs the search engine checks.
 
 ---
 

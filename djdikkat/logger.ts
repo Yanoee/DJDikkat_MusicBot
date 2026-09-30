@@ -3,7 +3,7 @@
  * Logger
  * Timestamped console output — patches global console
  * Writes to stdout and a zip-archived, per-run rotating log file
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { inspect } from 'node:util';

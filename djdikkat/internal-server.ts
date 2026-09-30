@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Internal HTTP server
  * Localhost-only API so admin-api can trigger bot actions
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import http from 'node:http';

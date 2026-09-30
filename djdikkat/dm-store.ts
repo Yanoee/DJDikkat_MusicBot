@@ -2,7 +2,7 @@
  * DJ DIKKAT - DM Store
  * Tracks message IDs of DMs the bot sends so they can be
  * bulk-deleted later via the admin panel "Clean DMs" button.
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { ChannelType } from 'discord.js';

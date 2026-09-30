@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Announcement helper
  * Weekly announcement, admin broadcasts, owner welcome DM
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 import { EmbedBuilder, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';

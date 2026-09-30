@@ -3,7 +3,7 @@
  * Runtime flags
  * Admin-toggleable maintenance switch (persisted via config-store,
  * restored at startup by index.ts)
- * Build 5.1.0
+ * Build 5.2.0
  * Author: Yanoee
  ************************************************************/
 

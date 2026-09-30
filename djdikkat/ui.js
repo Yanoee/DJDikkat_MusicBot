@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Ui/UX Emoji Container
  * Chat UI card and button layout
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 const {
@@ -14,11 +14,12 @@ const {
 
 const { getInactivityRemaining, clearIdleUiTimer } = require('./state');
 const { setUiMessage, getUiMessage, clearUiMessage } = require('./memory');
+const { logError } = require('./errors');
 
 // guildId -> controller message
 const controllers = new Map();
-// guildId -> Promise (serialises concurrent upsertController calls per guild)
-const upsertQueues = new Map();
+// guildId -> Promise (serialises upsert / repost / remove per guild)
+const controllerQueues = new Map();
 const QUEUE_TITLE_LIMIT = 25;
 const NOW_PLAYING_TITLE_LIMIT = 50;
 const IDLE_REFRESH_MS = 30 * 1000;
@@ -43,6 +44,20 @@ function formatMs(ms) {
   const h = Math.floor(total / 3600);
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * Fetch and delete one message by ID. Every failure (channel or message
+ * already gone, missing permissions) is swallowed — returns true if deleted.
+ */
+async function deleteMessage(client, channelId, messageId) {
+  if (!client || !channelId || !messageId) return false;
+  const channel = client.channels.cache.get(channelId)
+    || await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.messages) return false;
+  const msg = await channel.messages.fetch(messageId).catch(() => null);
+  if (!msg) return false;
+  return msg.delete().then(() => true).catch(() => false);
 }
 
 function truncateQueueTitle(title) {
@@ -293,19 +308,26 @@ function buildButtons(guildId, paused, loopCurrent, loopQueue) {
   ];
 }
 
+// ── Per-guild controller queue ──────────────────────────────────
+// Every card operation (upsert / repost / remove) runs after the previous
+// one for that guild has settled, so e.g. Skip's edit and the end event's
+// repost can't interleave and leave two cards behind.
+function enqueueController(guildId, what, fn) {
+  const next = (controllerQueues.get(guildId) ?? Promise.resolve())
+    .then(fn)
+    .catch(err => { logError(err, { guildId, during: `controller ${what}` }); })
+    .finally(() => {
+      if (controllerQueues.get(guildId) === next) controllerQueues.delete(guildId);
+    });
+  controllerQueues.set(guildId, next);
+  return next;
+}
+
 /**
  * Create or update controller message (text channel)
- * Serialised per guild to prevent duplicate cards from concurrent calls.
  */
-async function upsertController(guildId, state) {
-  const next = (upsertQueues.get(guildId) ?? Promise.resolve())
-    .then(() => _upsertController(guildId, state))
-    .catch(() => {})
-    .finally(() => {
-      if (upsertQueues.get(guildId) === next) upsertQueues.delete(guildId);
-    });
-  upsertQueues.set(guildId, next);
-  return next;
+function upsertController(guildId, state) {
+  return enqueueController(guildId, 'upsert', () => _upsertController(guildId, state));
 }
 
 async function _upsertController(guildId, state) {
@@ -358,7 +380,11 @@ async function _upsertController(guildId, state) {
 /**
  * Recreate controller message (move to bottom of channel)
  */
-async function repostController(guildId, state) {
+function repostController(guildId, state) {
+  return enqueueController(guildId, 'repost', () => _repostController(guildId, state));
+}
+
+async function _repostController(guildId, state) {
   if (!state.player || !state.textChannelId || !state.client) return;
   clearIdleUiTimer(state);
 
@@ -386,7 +412,11 @@ async function repostController(guildId, state) {
 /**
  * Remove controller message
  */
-async function removeController(guildId, client = null) {
+function removeController(guildId, client = null) {
+  return enqueueController(guildId, 'remove', () => _removeController(guildId, client));
+}
+
+async function _removeController(guildId, client) {
   const current = controllers.get(guildId) || await resolveControllerMessage(guildId, client);
   if (current) {
     await current.delete().catch(() => {});
@@ -399,5 +429,7 @@ module.exports = {
   upsertController,
   removeController,
   repostController,
-  truncateQueueTitle
+  truncateQueueTitle,
+  deleteMessage,
+  formatMs
 };

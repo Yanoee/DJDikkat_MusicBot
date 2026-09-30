@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Errors
  * Structured application errors with codes + correlation IDs
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 const crypto = require('crypto');

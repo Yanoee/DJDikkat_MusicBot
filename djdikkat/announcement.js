@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Announcement helper
  * Welcome and weekly announcement scheduling
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 
@@ -43,7 +43,9 @@ function canSendInChannel(channel, guild) {
 function findAnnouncementChannel(guild, settings, preferredChannelId = null) {
   if (!guild || !guild.channels) return null;
 
+  // An admin-pinned channel (set from the admin panel) always wins.
   const candidateIds = [];
+  if (settings?.announceChannelId) candidateIds.push(settings.announceChannelId);
   if (preferredChannelId) candidateIds.push(preferredChannelId);
   if (settings?.defaultTextChannelId) candidateIds.push(settings.defaultTextChannelId);
 

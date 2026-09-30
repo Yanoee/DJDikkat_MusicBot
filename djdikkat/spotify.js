@@ -2,14 +2,13 @@
  * DJ DIKKAT - Music Bot
  * Spotify fallback resolver
  * Spotify -> YouTube search queries
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 
 const { AppError, ErrorCodes } = require('./errors');
 
-const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || process.env.SPOTIFY_ID;
-const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || process.env.SPOTIFY_SECRET;
+const { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } = process.env;
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const API_BASE = 'https://api.spotify.com/v1';

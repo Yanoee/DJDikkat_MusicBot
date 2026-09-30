@@ -1,61 +1,52 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * Stats engine
- * Per-guild JSON-backed play counters and rollups
- * Build 4.0.0
+ * Per-guild play counters and rollups, stored in MariaDB
+ * Build 5.0.0
  * Author: Yanoee
  *
- * File layout:
- *   data/guilds/<guildId>/stats.json — play counts for this guild only
+ * Table:
+ *   stat_counters — one row per (guild, period, kind, key);
+ *                   period 'all' = totals, 'YYYY-MM-DD' = one day
  *
+ * Counters are preloaded into memory by loadAll() at startup and
+ * each play is written as atomic "count = count + 1" upserts.
  * Each guild's stats are fully isolated.
  ************************************************************/
 
-const fs   = require('fs');
-const path = require('path');
-const fsp  = fs.promises;
+const crypto = require('crypto');
+const db     = require('./db');
 
-const DATA_DIR       = path.join(__dirname, 'data');
-const MAX_DAYS       = 30;
-const WRITE_DEBOUNCE = 250; // ms
+const MAX_DAYS = 30;
+const TOTALS   = 'all';
 
 // Global boot counter (all guilds combined, resets on restart)
 let tracksSinceBoot = 0;
 let lastWriteTime   = null;
 
-// ── Per-guild caches and timers ───────────────────────────
-const statsCache    = new Map(); // guildId -> statsData
-const statsTimers   = new Map(); // guildId -> timer handle
-const statsInFlight = new Map(); // guildId -> Promise
-
-// ── Path helpers ──────────────────────────────────────────
-
-function guildDir(guildId) {
-  return path.join(DATA_DIR, 'guilds', guildId);
-}
-
-function statsFile(guildId) {
-  return path.join(guildDir(guildId), 'stats.json');
-}
+// ── Per-guild cache ───────────────────────────────────────
+const statsCache = new Map(); // guildId -> statsData
 
 // ── Date key helpers ──────────────────────────────────────
 
-function todayKey() {
-  const d = new Date();
+function dayKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function todayKey() {
+  return dayKey(new Date());
 }
 
 function daysAgoKey(daysAgo) {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return dayKey(d);
 }
 
-// ── Empty template ────────────────────────────────────────
+// ── Empty templates ───────────────────────────────────────
 
 function emptyStats() {
   return {
-    version: 1,
     totals: {
       songsByTitle: {},
       songsByUrl: {},
@@ -65,46 +56,55 @@ function emptyStats() {
   };
 }
 
-// ── Loader (sync on first call, then cached) ──────────────
+function emptyDay() {
+  return { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
+}
+
+// ── Loader ────────────────────────────────────────────────
 
 function loadStats(guildId) {
-  if (statsCache.has(guildId)) return statsCache.get(guildId);
-  let data = emptyStats();
-  try {
-    const file = statsFile(guildId);
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && parsed.totals && parsed.daily) data = parsed;
-    }
-  } catch {}
-  statsCache.set(guildId, data);
-  return data;
+  if (!statsCache.has(guildId)) statsCache.set(guildId, emptyStats());
+  return statsCache.get(guildId);
 }
 
-// ── Debounced writer ──────────────────────────────────────
+async function loadAll() {
+  statsCache.clear();
+  await pruneOldDays();
 
-function scheduleStatsWrite(guildId) {
-  if (statsTimers.has(guildId)) return;
-  statsTimers.set(guildId, setTimeout(() => {
-    statsTimers.delete(guildId);
-    const snapshot = statsCache.get(guildId) || emptyStats();
-    const prev = statsInFlight.get(guildId) ?? Promise.resolve();
-    const next = prev.then(async () => {
-      await fsp.mkdir(guildDir(guildId), { recursive: true });
-      await fsp.writeFile(statsFile(guildId), JSON.stringify(snapshot, null, 2), 'utf8');
-      lastWriteTime = new Date();
-    }).catch((err) => {
-      console.error(`Failed to write stats file for guild ${guildId}:`, err);
-    });
-    statsInFlight.set(guildId, next);
-  }, WRITE_DEBOUNCE));
+  const rows = await db.query('SELECT guild_id, period, kind, item_key, label, count FROM stat_counters');
+  for (const r of rows) {
+    const stats  = loadStats(r.guild_id);
+    const bucket = r.period === TOTALS
+      ? stats.totals
+      : (stats.daily[r.period] ||= emptyDay());
+
+    if (r.kind === 'title')      bucket.songsByTitle[r.item_key] = r.count;
+    else if (r.kind === 'url')   bucket.songsByUrl[r.item_key]   = { count: r.count, title: r.label || r.item_key };
+    else if (r.kind === 'user')  bucket.users[r.item_key]        = { count: r.count, tag: r.label || r.item_key };
+    else if (r.kind === 'plays' && r.period !== TOTALS) bucket.plays = r.count;
+  }
+  return { guilds: statsCache.size, counters: rows.length };
 }
+
+async function pruneOldDays() {
+  await db.query('DELETE FROM stat_counters WHERE period <> ? AND period < ?', [TOTALS, daysAgoKey(MAX_DAYS)]);
+}
+setInterval(() => db.background(pruneOldDays(), 'prune old daily stats'), 6 * 60 * 60 * 1000).unref();
 
 // ── Internal helpers ──────────────────────────────────────
 
 function increment(map, key, by = 1) {
   if (!key) return;
   map[key] = (map[key] || 0) + by;
+}
+
+function keyHash(key) {
+  return crypto.createHash('md5').update(key, 'utf8').digest();
+}
+
+function counterRow(guildId, period, kind, key, label) {
+  const k = String(key).slice(0, 1024);
+  return [guildId, period, kind, keyHash(k), k, label ? String(label).slice(0, 512) : null, 1];
 }
 
 function buildWeeklyRollup(stats) {
@@ -139,45 +139,42 @@ async function recordPlay(guildId, { title, uri, userId, userTag }) {
 
   const stats = loadStats(guildId);
   const day   = todayKey();
+  const daily = (stats.daily[day] ||= emptyDay());
+  const rows  = [];
 
-  if (!stats.daily[day]) {
-    stats.daily[day] = { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
+  for (const [bucket, period] of [[stats.totals, TOTALS], [daily, day]]) {
+    if (title) {
+      increment(bucket.songsByTitle, title, 1);
+      rows.push(counterRow(guildId, period, 'title', title, null));
+    }
+    if (uri) {
+      if (!bucket.songsByUrl[uri]) bucket.songsByUrl[uri] = { count: 0, title: title || uri };
+      bucket.songsByUrl[uri].count += 1;
+      rows.push(counterRow(guildId, period, 'url', uri, title || uri));
+    }
+    if (userId) {
+      if (!bucket.users[userId]) bucket.users[userId] = { count: 0, tag: userTag || userId };
+      bucket.users[userId].count += 1;
+      rows.push(counterRow(guildId, period, 'user', userId, userTag || userId));
+    }
   }
-
-  const daily = stats.daily[day];
-
-  // totals
-  if (title) increment(stats.totals.songsByTitle, title, 1);
-  if (uri) {
-    if (!stats.totals.songsByUrl[uri]) stats.totals.songsByUrl[uri] = { count: 0, title: title || uri };
-    stats.totals.songsByUrl[uri].count += 1;
-  }
-  if (userId) {
-    if (!stats.totals.users[userId]) stats.totals.users[userId] = { count: 0, tag: userTag || userId };
-    stats.totals.users[userId].count += 1;
-  }
-
-  // daily
   daily.plays += 1;
-  if (title) increment(daily.songsByTitle, title, 1);
-  if (uri) {
-    if (!daily.songsByUrl[uri]) daily.songsByUrl[uri] = { count: 0, title: title || uri };
-    daily.songsByUrl[uri].count += 1;
-  }
-  if (userId) {
-    if (!daily.users[userId]) daily.users[userId] = { count: 0, tag: userTag || userId };
-    daily.users[userId].count += 1;
-  }
+  rows.push(counterRow(guildId, day, 'plays', '', null));
 
-  // prune days older than MAX_DAYS
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - MAX_DAYS);
+  // prune days older than MAX_DAYS from the cache (the DB is pruned on a timer)
+  const cutoff = daysAgoKey(MAX_DAYS);
   for (const k of Object.keys(stats.daily)) {
-    const [y, m, d] = k.split('-').map(Number);
-    if (new Date(y, m - 1, d) < cutoff) delete stats.daily[k];
+    if (k < cutoff) delete stats.daily[k];
   }
 
-  scheduleStatsWrite(guildId);
+  db.background(
+    db.query(
+      `INSERT INTO stat_counters (guild_id, period, kind, key_hash, item_key, label, count) VALUES ?
+       ON DUPLICATE KEY UPDATE count = count + VALUES(count), label = COALESCE(label, VALUES(label))`,
+      [rows]
+    ).then(() => { lastWriteTime = new Date(); }),
+    `record stats for guild ${guildId}`
+  );
 }
 
 function getGuildStatsRaw(guildId) {
@@ -186,7 +183,7 @@ function getGuildStatsRaw(guildId) {
 
 function getStatsSnapshot(guildId) {
   const stats  = loadStats(guildId);
-  const today  = stats.daily[todayKey()] || { songsByTitle: {}, songsByUrl: {}, users: {}, plays: 0 };
+  const today  = stats.daily[todayKey()] || emptyDay();
   const weekly = buildWeeklyRollup(stats);
   return { totals: stats.totals, today, weekly };
 }
@@ -221,6 +218,7 @@ function topUsers(map, limit = 3) {
 // ── Exports ───────────────────────────────────────────────
 
 module.exports = {
+  loadAll,
   recordPlay,
   getGuildStatsRaw,
   getStatsSnapshot,

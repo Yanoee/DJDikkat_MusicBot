@@ -1,75 +1,51 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * Memory store
- * Per-guild JSON storage (history / settings / messages)
- * Build 4.0.0
+ * Per-guild storage (history / settings / messages) in MariaDB
+ * Build 5.0.0
  * Author: Yanoee
  *
- * File layout:
- *   data/guilds/<guildId>/memory.json   — history, settings
- *   data/guilds/<guildId>/messages.json — UI / stats message IDs
+ * Tables:
+ *   guilds — settings + UI / stats message IDs (one row per guild)
+ *   plays  — every track played (history = newest HISTORY_MAX per guild)
+ *
+ * Everything is preloaded into memory by loadAll() at startup, so
+ * all getters stay synchronous. Writes update the cache first and
+ * then go to the DB in the background.
  *
  * Each guild is fully isolated. Resetting one guild never
- * touches another guild's files.
+ * touches another guild's rows.
  ************************************************************/
 
-const fs   = require('fs');
-const path = require('path');
-const fsp  = fs.promises;
+const db = require('./db');
 
-const DATA_DIR       = path.join(__dirname, 'data');
 const HISTORY_MAX    = 200;
-const RECENT_MAX     = 10;
 const WRITE_DEBOUNCE = 250; // ms
 
 // ── Per-guild in-memory caches ────────────────────────────
-const memCache    = new Map(); // guildId -> memory data
-const msgCache    = new Map(); // guildId -> messages data
+const memCache = new Map(); // guildId -> memory data
+const msgCache = new Map(); // guildId -> messages data
 
-// ── Per-guild debounce timers ─────────────────────────────
-const memTimers   = new Map(); // guildId -> timer handle
-const msgTimers   = new Map(); // guildId -> timer handle
-
-// ── Per-guild write-in-flight promises ────────────────────
-const memInFlight = new Map(); // guildId -> Promise
-const msgInFlight = new Map(); // guildId -> Promise
-
-// ── Path helpers ──────────────────────────────────────────
-
-function guildDir(guildId) {
-  return path.join(DATA_DIR, 'guilds', guildId);
-}
-
-function memFile(guildId) {
-  return path.join(guildDir(guildId), 'memory.json');
-}
-
-function msgFile(guildId) {
-  return path.join(guildDir(guildId), 'messages.json');
-}
+// ── Per-guild debounced row writes ────────────────────────
+const rowTimers   = new Map(); // guildId -> timer handle
+const rowInFlight = new Map(); // guildId -> Promise
 
 // ── Empty templates ───────────────────────────────────────
 
 function emptyMemory() {
   return {
-    version: 1,
     settings: {
-      volume: 100,
       defaultTextChannelId: null,
-      djRoleId: null,
-      debug: false,
+      announceChannelId: null,
       lastCommandTime: null,
       lastAnnouncementAt: null
     },
-    recentSongs: [],
-    recentUsers: [],
     history: []
   };
 }
 
 function emptyMessages() {
   return {
-    version: 1,
     uiMessageId: null,
     uiChannelId: null,
     statsMessageId: null,
@@ -78,75 +54,152 @@ function emptyMessages() {
   };
 }
 
-// ── Loaders (sync on first call, then cached) ─────────────
+// ── Loaders ───────────────────────────────────────────────
 
 function loadMemory(guildId) {
-  if (memCache.has(guildId)) return memCache.get(guildId);
-  let data = emptyMemory();
-  try {
-    const file = memFile(guildId);
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && Array.isArray(parsed.history)) data = parsed;
-    }
-  } catch {}
-  memCache.set(guildId, data);
-  return data;
+  if (!memCache.has(guildId)) memCache.set(guildId, emptyMemory());
+  return memCache.get(guildId);
 }
 
 function loadMessages(guildId) {
-  if (msgCache.has(guildId)) return msgCache.get(guildId);
-  let data = emptyMessages();
-  try {
-    const file = msgFile(guildId);
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && parsed.version) data = { ...emptyMessages(), ...parsed };
-    }
-  } catch {}
-  msgCache.set(guildId, data);
-  return data;
+  if (!msgCache.has(guildId)) msgCache.set(guildId, emptyMessages());
+  return msgCache.get(guildId);
 }
 
-// ── Debounced writers ─────────────────────────────────────
+async function loadAll() {
+  memCache.clear();
+  msgCache.clear();
 
-function scheduleMemWrite(guildId) {
-  if (memTimers.has(guildId)) return;
-  memTimers.set(guildId, setTimeout(() => {
-    memTimers.delete(guildId);
-    const snapshot = memCache.get(guildId) || emptyMemory();
-    const prev = memInFlight.get(guildId) ?? Promise.resolve();
-    const next = prev.then(async () => {
-      await fsp.mkdir(guildDir(guildId), { recursive: true });
-      await fsp.writeFile(memFile(guildId), JSON.stringify(snapshot, null, 2), 'utf8');
-    }).catch((err) => {
-      console.error(`Failed to write memory file for guild ${guildId}:`, err);
+  for (const r of await db.query('SELECT * FROM guilds')) {
+    const mem = emptyMemory();
+    mem.settings = {
+      defaultTextChannelId: r.default_text_channel_id,
+      announceChannelId:    r.announce_channel_id,
+      lastCommandTime:      db.toIso(r.last_command_at),
+      lastAnnouncementAt:   db.toIso(r.last_announcement_at)
+    };
+    memCache.set(r.guild_id, mem);
+    msgCache.set(r.guild_id, {
+      uiMessageId:    r.ui_message_id,
+      uiChannelId:    r.ui_channel_id,
+      statsMessageId: r.stats_message_id,
+      statsChannelId: r.stats_channel_id,
+      statsPostedAt:  db.toIso(r.stats_posted_at)
     });
-    memInFlight.set(guildId, next);
+  }
+
+  const rows = await db.query(
+    `SELECT guild_id, title, url, user_id, user_tag, played_at FROM (
+       SELECT p.*, ROW_NUMBER() OVER (PARTITION BY guild_id ORDER BY played_at DESC, id DESC) AS rn
+       FROM plays p
+     ) t WHERE rn <= ? ORDER BY guild_id, played_at DESC, id DESC`,
+    [HISTORY_MAX]
+  );
+  for (const r of rows) {
+    loadMemory(r.guild_id).history.push({
+      title: r.title, url: r.url, userId: r.user_id, userTag: r.user_tag, ts: db.toIso(r.played_at)
+    });
+  }
+
+  return { guilds: memCache.size, plays: rows.length };
+}
+
+// ── Debounced guild row writer ────────────────────────────
+
+function guildRowParams(guildId) {
+  const s = loadMemory(guildId).settings;
+  const m = loadMessages(guildId);
+  return [
+    guildId,
+    s.defaultTextChannelId || null,
+    s.announceChannelId || null,
+    db.toDate(s.lastCommandTime),
+    db.toDate(s.lastAnnouncementAt),
+    m.uiMessageId || null,
+    m.uiChannelId || null,
+    m.statsMessageId || null,
+    m.statsChannelId || null,
+    db.toDate(m.statsPostedAt)
+  ];
+}
+
+const UPSERT_GUILD_ROW = `
+  INSERT INTO guilds (guild_id, default_text_channel_id, announce_channel_id,
+                      last_command_at, last_announcement_at,
+                      ui_message_id, ui_channel_id, stats_message_id, stats_channel_id, stats_posted_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON DUPLICATE KEY UPDATE
+    default_text_channel_id = VALUES(default_text_channel_id),
+    announce_channel_id = VALUES(announce_channel_id),
+    last_command_at = VALUES(last_command_at), last_announcement_at = VALUES(last_announcement_at),
+    ui_message_id = VALUES(ui_message_id), ui_channel_id = VALUES(ui_channel_id),
+    stats_message_id = VALUES(stats_message_id), stats_channel_id = VALUES(stats_channel_id),
+    stats_posted_at = VALUES(stats_posted_at)`;
+
+function writeGuildRow(guildId) {
+  const params = guildRowParams(guildId); // snapshot now, not when the chain gets to it
+  const prev = rowInFlight.get(guildId) ?? Promise.resolve();
+  const next = prev
+    .then(() => db.query(UPSERT_GUILD_ROW, params))
+    .catch(err => console.error(`[DB] Failed to write guild row ${guildId}: ${err.message}`));
+  rowInFlight.set(guildId, next);
+  return next;
+}
+
+function scheduleGuildWrite(guildId) {
+  if (rowTimers.has(guildId)) return;
+  rowTimers.set(guildId, setTimeout(() => {
+    rowTimers.delete(guildId);
+    writeGuildRow(guildId);
   }, WRITE_DEBOUNCE));
 }
 
-function scheduleMsgWrite(guildId) {
-  if (msgTimers.has(guildId)) return;
-  msgTimers.set(guildId, setTimeout(() => {
-    msgTimers.delete(guildId);
-    const snapshot = msgCache.get(guildId) || emptyMessages();
-    const prev = msgInFlight.get(guildId) ?? Promise.resolve();
-    const next = prev.then(async () => {
-      await fsp.mkdir(guildDir(guildId), { recursive: true });
-      await fsp.writeFile(msgFile(guildId), JSON.stringify(snapshot, null, 2), 'utf8');
-    }).catch((err) => {
-      console.error(`Failed to write message file for guild ${guildId}:`, err);
-    });
-    msgInFlight.set(guildId, next);
-  }, WRITE_DEBOUNCE));
+// Writes any pending debounced rows now. Called on shutdown.
+async function flush() {
+  for (const [guildId, timer] of rowTimers) {
+    clearTimeout(timer);
+    rowTimers.delete(guildId);
+    writeGuildRow(guildId);
+  }
+  await Promise.all(rowInFlight.values());
 }
 
-// ── Internal helper ───────────────────────────────────────
+// ── Public API — guild directory ──────────────────────────
 
-function updateRecent(list, item, keyFn) {
-  const key = keyFn(item);
-  return [item, ...list.filter(x => keyFn(x) !== key)].slice(0, RECENT_MAX);
+// Keeps name/icon/membership current so the admin panel can show every
+// guild the bot has data for, including ones it has since left.
+async function syncGuildInfo(guild, present = true) {
+  if (!guild?.id) return;
+  await db.query(
+    `INSERT INTO guilds (guild_id, name, icon_url, member_count, in_guild, joined_at, left_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       name = COALESCE(VALUES(name), name), icon_url = VALUES(icon_url),
+       member_count = COALESCE(VALUES(member_count), member_count),
+       in_guild = VALUES(in_guild), joined_at = COALESCE(VALUES(joined_at), joined_at),
+       left_at = VALUES(left_at)`,
+    [
+      guild.id,
+      guild.name ? String(guild.name).slice(0, 100) : null,
+      present && guild.iconURL ? guild.iconURL({ size: 64 }) : null,
+      Number.isFinite(guild.memberCount) ? guild.memberCount : null,
+      present ? 1 : 0,
+      db.toDate(guild.joinedAt),
+      present ? null : new Date()
+    ]
+  );
+}
+
+async function syncAllGuildInfo(client) {
+  const ids = [...client.guilds.cache.keys()];
+  for (const guild of client.guilds.cache.values()) await syncGuildInfo(guild, true);
+  // Anything not in the cache any more was left while the bot was offline.
+  if (ids.length) {
+    await db.query(
+      'UPDATE guilds SET in_guild = 0, left_at = COALESCE(left_at, ?) WHERE in_guild = 1 AND guild_id NOT IN (?)',
+      [new Date(), ids]
+    );
+  }
 }
 
 // ── Public API — history ──────────────────────────────────
@@ -166,21 +219,11 @@ async function recordHistory(guildId, { title, url, userId, userTag }) {
   mem.history.unshift(entry);
   if (mem.history.length > HISTORY_MAX) mem.history.length = HISTORY_MAX;
 
-  mem.recentSongs = updateRecent(
-    mem.recentSongs,
-    { title: entry.title, url: entry.url },
-    x => `${x.title}|${x.url || ''}`
-  );
-
-  if (userId) {
-    mem.recentUsers = updateRecent(
-      mem.recentUsers,
-      { userId, userTag: userTag || userId },
-      x => x.userId
-    );
-  }
-
-  scheduleMemWrite(guildId);
+  db.background(db.query(
+    'INSERT INTO plays (guild_id, title, url, user_id, user_tag, played_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [guildId, entry.title.slice(0, 512), entry.url ? entry.url.slice(0, 1024) : null,
+     entry.userId, entry.userTag ? entry.userTag.slice(0, 100) : null, new Date(entry.ts)]
+  ), `record play for guild ${guildId}`);
 }
 
 function getHistoryPage(guildId, page, pageSize) {
@@ -203,7 +246,7 @@ async function setGuildSettings(guildId, patch) {
   if (!guildId) return;
   const mem = loadMemory(guildId);
   mem.settings = { ...mem.settings, ...patch };
-  scheduleMemWrite(guildId);
+  scheduleGuildWrite(guildId);
 }
 
 function getGuildMemory(guildId) {
@@ -216,25 +259,25 @@ function getGuildMessagesRaw(guildId) {
 
 // ── Public API — reset (guild-scoped, never cross-guild) ──
 
+// Settings back to defaults + history wiped.
 async function resetGuildMemory(guildId) {
   if (!guildId) return;
-  memCache.delete(guildId);
-  await fsp.unlink(memFile(guildId)).catch(() => {});
+  memCache.set(guildId, emptyMemory());
+  await db.query('DELETE FROM plays WHERE guild_id = ?', [guildId]);
+  await writeGuildRow(guildId);
 }
 
 async function resetGuildHistory(guildId) {
   if (!guildId) return;
   const mem = loadMemory(guildId);
-  mem.history     = [];
-  mem.recentSongs = [];
-  mem.recentUsers = [];
-  scheduleMemWrite(guildId);
+  mem.history = [];
+  await db.query('DELETE FROM plays WHERE guild_id = ?', [guildId]);
 }
 
 async function resetGuildMessages(guildId) {
   if (!guildId) return;
-  msgCache.delete(guildId);
-  await fsp.unlink(msgFile(guildId)).catch(() => {});
+  msgCache.set(guildId, emptyMessages());
+  await writeGuildRow(guildId);
 }
 
 // ── Public API — UI message tracking ─────────────────────
@@ -244,7 +287,7 @@ async function setUiMessage(guildId, channelId, messageId) {
   const msg = loadMessages(guildId);
   msg.uiMessageId = messageId || null;
   msg.uiChannelId = channelId || null;
-  scheduleMsgWrite(guildId);
+  scheduleGuildWrite(guildId);
 }
 
 async function clearUiMessage(guildId) {
@@ -261,12 +304,7 @@ function getUiMessage(guildId) {
 
 function getAllSavedUiMessages() {
   const results = [];
-  const guildsDir = path.join(DATA_DIR, 'guilds');
-  if (!fs.existsSync(guildsDir)) return results;
-  const entries = fs.readdirSync(guildsDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const guildId = entry.name;
+  for (const guildId of msgCache.keys()) {
     const { messageId, channelId } = getUiMessage(guildId);
     if (messageId && channelId) results.push({ guildId, messageId, channelId });
   }
@@ -281,7 +319,7 @@ async function setStatsMessage(guildId, channelId, messageId) {
   msg.statsMessageId = messageId || null;
   msg.statsChannelId = channelId || null;
   msg.statsPostedAt  = messageId ? new Date().toISOString() : null;
-  scheduleMsgWrite(guildId);
+  scheduleGuildWrite(guildId);
 }
 
 async function clearStatsMessage(guildId) {
@@ -299,12 +337,7 @@ function getStatsMessage(guildId) {
 
 function getAllSavedStatsMessages() {
   const results = [];
-  const guildsDir = path.join(DATA_DIR, 'guilds');
-  if (!fs.existsSync(guildsDir)) return results;
-  const entries = fs.readdirSync(guildsDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const guildId = entry.name;
+  for (const guildId of msgCache.keys()) {
     const { messageId, channelId, postedAt } = getStatsMessage(guildId);
     if (messageId && channelId) results.push({ guildId, messageId, channelId, postedAt });
   }
@@ -314,6 +347,10 @@ function getAllSavedStatsMessages() {
 // ── Exports ───────────────────────────────────────────────
 
 module.exports = {
+  loadAll,
+  flush,
+  syncGuildInfo,
+  syncAllGuildInfo,
   recordHistory,
   setGuildSettings,
   getGuildMemory,

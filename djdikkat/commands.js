@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 
@@ -18,13 +18,14 @@ const {
 
 const {
   getState,
+  peekState,
   checkCooldown
 } = require('./state');
 
 const {
   upsertController,
-  repostController,
-  truncateQueueTitle
+  truncateQueueTitle,
+  deleteMessage
 } = require('./ui');
 
 const {
@@ -43,7 +44,7 @@ const {
 const { getStatsMeta } = require('./stats');
 const { buildStatsChannelMessage } = require('./stats_ui');
 const { buildHealthMessage } = require('./health');
-const { getHistoryPage, getGuildMemory, setGuildSettings, resetGuildMemory, resetGuildHistory, resetGuildMessages, setStatsMessage, getStatsMessage, clearStatsMessage } = require('./memory');
+const { getHistoryPage, setGuildSettings, resetGuildMemory, resetGuildHistory, resetGuildMessages, setStatsMessage, getStatsMessage, clearStatsMessage } = require('./memory');
 const { isSpotifyUrl, resolveSpotifyTracks } = require('./spotify');
 const { sendAnnouncement } = require('./announcement');
 const { trackDm } = require('./dm-store');
@@ -53,6 +54,8 @@ const { UserError, logError } = require('./errors');
 let BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
 const QUEUE_PAGE_SIZE = 10;
+const MAX_QUEUE = 25;
+const STATS_AUTO_DELETE_MS = 3 * 60 * 1000;
 
 function getButtonCooldownMs() { return BUTTON_COOLDOWN_MS; }
 function setButtonCooldownMs(ms) {
@@ -76,7 +79,7 @@ function getButtonCooldownRemaining(state, userId) {
   return 0;
 }
 
-function buildHistoryEmbed(guildId, pageData) {
+function buildHistoryEmbed(pageData) {
   const lines = pageData.entries.map((e, idx) => {
     const n = (pageData.page - 1) * 10 + idx + 1;
     const title = e.title || 'Unknown';
@@ -327,6 +330,7 @@ async function handleInteraction(interaction) {
   const _t0 = Date.now();
   let _label = null;
   let _outcome = 'ok';
+  let _announce = false;
   try {
     /* ---------------- SLASH COMMANDS ---------------- */
     if (interaction.isChatInputCommand()) {
@@ -353,9 +357,9 @@ async function handleInteraction(interaction) {
         lastCommandTime: new Date().toISOString()
       });
 
-      await sendAnnouncement(interaction.guild, interaction.client, interaction.channelId).catch(err => {
-        console.error(`Announcement failed in guild ${guildId}:`, err);
-      });
+      // The weekly announcement goes out after the command is handled (see
+      // finally) so it never eats into Discord's 3s acknowledgement window.
+      _announce = true;
 
       /* 🎵 PLAY */
       if (commandName === 'play') {
@@ -363,9 +367,13 @@ async function handleInteraction(interaction) {
 
         const query = interaction.options.getString('query', true);
         const state = getState(guildId);
-        state.textChannelId = interaction.channelId;
 
         await ensurePlayer(interaction);
+        state.textChannelId = interaction.channelId;
+
+        if (state.queue.length >= MAX_QUEUE) {
+          return interaction.editReply(`❌ Queue is full (${MAX_QUEUE} tracks max). Skip or clear some tracks first.`);
+        }
 
         const node = pickNode(interaction.client);
         if (!node) {
@@ -377,7 +385,8 @@ async function handleInteraction(interaction) {
         if (isSpotifyUrl(query)) {
           let queries = [];
           try {
-            queries = await resolveSpotifyTracks(query, 25);
+            // Only resolve as many tracks as the queue can still take.
+            queries = await resolveSpotifyTracks(query, MAX_QUEUE - state.queue.length);
           } catch (err) {
             const appErr = logError(err, { guildId });
             return interaction.editReply(`❌ Spotify error (ref: ${appErr.ref}). Try again in a moment, or paste a direct YouTube link instead.`);
@@ -447,7 +456,7 @@ async function handleInteraction(interaction) {
           return interaction.editReply('❌ No results found');
         }
 
-        const MAX_QUEUE = 25;
+        // Re-check: the queue may have filled up while we were searching.
         const available = Math.max(0, MAX_QUEUE - state.queue.length);
         if (available === 0) {
           return interaction.editReply(`❌ Queue is full (${MAX_QUEUE} tracks max). Skip or clear some tracks first.`);
@@ -463,10 +472,9 @@ async function handleInteraction(interaction) {
           state.queue.push(t);
         });
 
+        // Idle: playNext() below posts the card for the new track.
         if (state.current) {
           await upsertController(guildId, state);
-        } else {
-          await repostController(guildId, state);
         }
 
         const skipped = originalCount - tracks.length;
@@ -485,16 +493,15 @@ async function handleInteraction(interaction) {
       /* ⏯️ PAUSE / RESUME */
       if (commandName === 'pause') {
         const state = getState(guildId);
-        state.textChannelId = interaction.channelId;
         if (!await canControlPlayback(interaction, state)) return;
-        const paused = await togglePause(guildId);
+        state.textChannelId = interaction.channelId;
+        const paused = await togglePause(guildId); // also refreshes the card
         if (paused == null) {
           return interaction.reply({
             content: '🔇 Nothing is playing',
             flags: MessageFlags.Ephemeral
           });
         }
-        await upsertController(guildId, state);
         return interaction.reply({
           content: paused ? '⏸️ Paused' : '▶️ Resumed',
           flags: MessageFlags.Ephemeral
@@ -504,16 +511,15 @@ async function handleInteraction(interaction) {
       /* ⏭️ SKIP */
       if (commandName === 'skip') {
         const state = getState(guildId);
-        state.textChannelId = interaction.channelId;
         if (!await canControlPlayback(interaction, state)) return;
+        state.textChannelId = interaction.channelId;
         if (!state.current) {
           return interaction.reply({
             content: '🔇 Nothing is playing',
             flags: MessageFlags.Ephemeral
           });
         }
-        await stopTrack(guildId);
-        await upsertController(guildId, state);
+        await stopTrack(guildId); // the 'stopped' end event advances + reposts the card
         return interaction.reply({
           content: '⏭️ Skipped',
           flags: MessageFlags.Ephemeral
@@ -523,8 +529,8 @@ async function handleInteraction(interaction) {
       /* 📜 QUEUE */
       if (commandName === 'queue') {
         const state = getState(guildId);
-        state.textChannelId = interaction.channelId;
         if (!await canControlPlayback(interaction, state)) return;
+        state.textChannelId = interaction.channelId;
         await upsertController(guildId, state);
         const pageData = getQueuePageData(state, 1);
         const components = buildQueueComponents(guildId, pageData.page, pageData.totalPages, interaction.user.id);
@@ -546,6 +552,8 @@ async function handleInteraction(interaction) {
             flags: MessageFlags.Ephemeral
           });
         }
+        // DB lookup + DM can take longer than Discord's 3s window — ack first.
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const state = getState(guildId);
         const meta = getStatsMeta();
         const node = pickNode(interaction.client);
@@ -553,80 +561,48 @@ async function handleInteraction(interaction) {
         try {
           const sent = await interaction.user.send(msg);
           if (sent) await trackDm(sent.channel.id, sent.id, 'health').catch(() => {});
-          return interaction.reply({ content: '🩺 Health report sent to your DM.', flags: MessageFlags.Ephemeral });
+          return interaction.editReply('🩺 Health report sent to your DM.');
         } catch {
-          return interaction.reply({ content: '❌ I could not DM you. Check your privacy settings.', flags: MessageFlags.Ephemeral });
+          return interaction.editReply('❌ I could not DM you. Check your privacy settings.');
         }
       }
 
       /* 📊 STATS */
       if (commandName === 'stats') {
-        const payload = buildStatsChannelMessage(guildId);
-        const { messageId, channelId } = getStatsMessage(guildId);
-        const AUTO_DELETE_MS = 3 * 60 * 1000;
-        // Fallback cleanup: remove recent bot stats cards in this channel
-        if (interaction.channel?.messages) {
-          const recent = await interaction.channel.messages.fetch({ limit: 20 }).catch(() => null);
-          if (recent) {
-            const toDelete = recent.filter(m =>
-              m.author?.id === interaction.client.user.id
-              && m.embeds?.[0]?.title?.includes('DJ DIKKAT Stats')
-            );
-            for (const msg of toDelete.values()) {
-              await msg.delete().catch(() => {});
-            }
-          }
-        }
-        if (messageId && channelId) {
-          const channel = interaction.channelId === channelId
-            ? interaction.channel
-            : await interaction.client.channels.fetch(channelId).catch(() => null);
-          if (channel?.messages) {
-            const oldMsg = await channel.messages.fetch(messageId).catch(() => null);
-            if (oldMsg) {
-              const deleted = await oldMsg.delete().then(() => true).catch(() => false);
-              if (!deleted) {
-                const edited = await oldMsg.edit(payload).then(() => true).catch(() => false);
-                if (edited) {
-                  await setStatsMessage(guildId, channelId, oldMsg.id);
-                  setTimeout(() => {
-                    if (getState(guildId)?.current) return;
-                    oldMsg.delete().catch(() => {});
-                    clearStatsMessage(guildId).catch(() => {});
-                  }, AUTO_DELETE_MS);
-                  return interaction.reply({ content: '✅ Stats updated.', flags: MessageFlags.Ephemeral });
-                }
-              }
-            } else {
-              await clearStatsMessage(guildId);
-            }
-          } else {
-            await clearStatsMessage(guildId);
-          }
+        await interaction.deferReply();
+        // One stats card per guild: drop the previous one before posting anew.
+        const old = getStatsMessage(guildId);
+        if (old.messageId && old.channelId) {
+          await deleteMessage(interaction.client, old.channelId, old.messageId);
+          await clearStatsMessage(guildId);
         }
 
-        const msg = await interaction.reply(payload);
-        const message = msg?.id ? msg : await interaction.fetchReply();
+        // editReply resolves to the real Message. (reply()'s InteractionResponse
+        // carries the interaction id, which never matched the card.)
+        const message = await interaction.editReply(buildStatsChannelMessage(guildId));
         await setStatsMessage(guildId, interaction.channelId, message.id);
         setTimeout(() => {
-          if (getState(guildId)?.current) return;
+          if (peekState(guildId)?.current) return;
           message.delete().catch(() => {});
-          clearStatsMessage(guildId).catch(() => {});
-        }, AUTO_DELETE_MS);
+          if (getStatsMessage(guildId).messageId === message.id) {
+            clearStatsMessage(guildId).catch(() => {});
+          }
+        }, STATS_AUTO_DELETE_MS);
         return;
       }
 
       /* 📜 HISTORY */
       if (commandName === 'history') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const pageData = getHistoryPage(guildId, 1, 10);
-        const embed = buildHistoryEmbed(guildId, pageData);
+        const embed = buildHistoryEmbed(pageData);
         const components = buildHistoryComponents(guildId, pageData.page, pageData.totalPages, interaction.user.id);
         try {
           const sent = await interaction.user.send({ embeds: [embed], components });
           if (sent) await trackDm(sent.channel.id, sent.id, 'history').catch(() => {});
-          return interaction.reply({ content: '📜 History sent to your DM.', flags: MessageFlags.Ephemeral });
+          return interaction.editReply('📜 History sent to your DM.');
         } catch {
-          return interaction.reply({ content: '❌ I could not DM you. Check your privacy settings.', flags: MessageFlags.Ephemeral });
+          return interaction.editReply('❌ I could not DM you. Check your privacy settings.');
         }
       }
 
@@ -645,8 +621,8 @@ async function handleInteraction(interaction) {
       /* ⏹️ STOP */
       if (commandName === 'stop') {
         const state = getState(guildId);
-        state.textChannelId = interaction.channelId;
         if (!await canControlPlayback(interaction, state)) return;
+        state.textChannelId = interaction.channelId;
         await stopPlayback(guildId);
         return interaction.reply({
           content: '⏹️ Stopped playback',
@@ -690,8 +666,6 @@ async function handleInteraction(interaction) {
         return;
       }
       if (interaction.customId && interaction.customId.startsWith('announce:remove:')) {
-        const parts = interaction.customId.split(':');
-        const guildId = parts[2];
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
           return interaction.reply({ content: '⛔ Admins only.', flags: MessageFlags.Ephemeral });
         }
@@ -710,7 +684,7 @@ async function handleInteraction(interaction) {
         }
         const nextPage = action === 'next' ? page + 1 : page - 1;
         const pageData = getHistoryPage(guildId, nextPage, 10);
-        const embed = buildHistoryEmbed(guildId, pageData);
+        const embed = buildHistoryEmbed(pageData);
         const components = buildHistoryComponents(guildId, pageData.page, pageData.totalPages, userId);
         await interaction.update({ embeds: [embed], components }).catch(() => {});
         return;
@@ -772,11 +746,10 @@ async function handleInteraction(interaction) {
 
       if (action === 'toggle') {
         state.textChannelId = interaction.channelId;
-        const paused = await togglePause(guildId);
+        const paused = await togglePause(guildId); // also refreshes the card
         if (paused == null) {
           return interaction.followUp({ content: '🔇 Nothing is playing', flags: MessageFlags.Ephemeral });
         }
-        await upsertController(guildId, state);
         return interaction.followUp({
           content: paused ? '⏸️ Paused' : '▶️ Resumed',
           flags: MessageFlags.Ephemeral
@@ -788,15 +761,13 @@ async function handleInteraction(interaction) {
         if (!state.current) {
           return interaction.followUp({ content: '🔇 Nothing is playing', flags: MessageFlags.Ephemeral });
         }
-        await stopTrack(guildId);
-        await upsertController(guildId, state);
+        await stopTrack(guildId); // the 'stopped' end event advances + reposts the card
         return interaction.followUp({ content: '⏭️ Skipped', flags: MessageFlags.Ephemeral });
       }
 
       if (action === 'clearqueue') {
         state.textChannelId = interaction.channelId;
-        await clearQueue(guildId);
-        await upsertController(guildId, state);
+        await clearQueue(guildId); // also refreshes the card
         return interaction.followUp({ content: '🧹 Queue cleared', flags: MessageFlags.Ephemeral });
       }
 
@@ -886,6 +857,11 @@ async function handleInteraction(interaction) {
     } catch {}
   } finally {
     if (_label) console.debug(`[CMD] ← ${_label} ${_outcome} (${Date.now() - _t0}ms)`);
+    if (_announce) {
+      sendAnnouncement(interaction.guild, interaction.client, interaction.channelId).catch(err => {
+        console.error(`Announcement failed in guild ${interaction.guildId}:`, err);
+      });
+    }
   }
 }
 

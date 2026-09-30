@@ -24,10 +24,10 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 - **Multi-source playback** - Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
 - **Spotify support** - Resolves Spotify tracks, albums, and full playlists to YouTube via the Spotify Web API. No Spotify premium account needed on your end.
 - **Interactive player card** - A persistent embed in your text channel with live controls. No need to type commands - everything is a button click.
-- **3-state loop** - Cycles Off ~ Track ~ Queue ~ Off. Toggle any time from the player card or `/play`.
+- **3-state loop** - Cycles Off ~ Track ~ Queue ~ Off. Toggle any time with the loop button on the player card.
 - **Queue shuffle** - Fisher-Yates shuffle applied instantly, reflected live in the card.
-- **Play history** - Per-guild log of up to 200 tracks with timestamps and requester info. Paginated and sent to your DM via `/history`.
-- **Stats tracking** - Per-guild stats: most-played songs, top users, daily and weekly breakdowns. Data older than 30 days is pruned automatically.
+- **Play history** - Every play is kept in the database with timestamp and requester info. `/history` shows the newest 200, paginated and sent to your DM.
+- **Stats tracking** - Per-guild stats: most-played songs, top users, daily and weekly breakdowns. All-time totals are kept forever; daily breakdowns older than 30 days are pruned automatically.
 - **Auto-disconnect** - Bot leaves after 5 minutes of idle. No manual cleanup needed.
 - **Idle player card** - When the queue empties, the card stays with a live countdown and a "Play Again" button for the last track.
 - **Clean chat** - Player card is deleted and reposted fresh with each new song. Stale cards from previous sessions are cleaned up on startup.
@@ -35,7 +35,7 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 - **Voice channel status** - Updates the voice channel status to show the currently playing track.
 - **Weekly announcements** - Sends an informational embed to each guild every 7 days (dismissible by admins).
 - **Owner welcome DM** - When added to a new server, the owner gets a DM with a quick-start guide and required permissions list.
-- **Per-guild data isolation** - History, stats, and settings live in separate JSON files per guild. One guild can never touch another's data.
+- **MariaDB storage** - History, stats, settings, and admin state live in MariaDB (schema in `djdikkat/schema.sql`, created automatically on startup). Every row is keyed by guild, so resetting one guild never touches another's data. Nightly gzipped backups via `updater/backup-db.sh`.
 
 ---
 
@@ -43,15 +43,17 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 
 | Command | Description |
 |---|---|
-| `/play <query>` | Search by name or paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. Queue cap: 5 tracks. |
+| `/play <query>` | Search by name or paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. Queue cap: 25 tracks. |
 | `/pause` | Pause or resume the current track. |
 | `/skip` | Skip the current track immediately. |
 | `/stop` | Stop playback and clear the queue. Bot stays in voice. |
-| `/queue` | Show the current queue with requester info. Paginated, 10 tracks per page. |
-| `/history` | View recently played tracks for this server. Paginated, sent via DM. |
+| `/queue` | Show the current queue with requester info. Paginated, 10 tracks per page. You need to be in the bot's voice channel. |
+| `/history` | View the newest 200 plays for this server. Paginated, sent via DM. |
 | `/stats` | Show music stats - top songs, top users, today's top, and weekly top. Auto-deletes after 3 minutes if nothing is playing. |
 | `/disconnect` | Stop everything and disconnect the bot from voice. |
 | `/health` | *(Admin only)* Full health report sent via DM - Discord ping, RAM, CPU, NodeLink stats, uptime, and last update info. |
+
+> Commands have a 5-second per-server cooldown (adjustable in the admin panel).
 
 ### Player Card Buttons
 
@@ -93,8 +95,22 @@ When music is playing, a rich embed appears in your text channel:
 - **Shoukaku v4** - NodeLink/Lavalink client for Node.js
 - **NodeLink** - audio streaming backend
 - **Spotify Web API** - track metadata and resolution for Spotify links
+- **MariaDB 10.11** + **mysql2** - persistent storage
 - **dotenv** - environment variable management
 - **Plain JavaScript** - no framework, no bloat
+
+### 🗄 Database setup (self-hosting)
+
+Since v5.0.0 the bot stores its data in MariaDB instead of JSON files.
+
+```sql
+CREATE DATABASE djdikkat CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'djdikkat'@'localhost' IDENTIFIED BY 'change-me';
+GRANT ALL PRIVILEGES ON djdikkat.* TO 'djdikkat'@'localhost';
+```
+
+Add to `djdikkat/.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Tables are created on first start.
+Upgrading from v4 (JSON)? Stop the bot and run `node djdikkat/scripts/import-json.js` once — it imports `djdikkat/data/` and verifies the counts.
 
 ---
 

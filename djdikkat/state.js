@@ -2,12 +2,12 @@
  * DJ DIKKAT - Music Bot
  * State manager
  * Guild state and timers
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 const guildState = new Map();
 
-// timings (same as old code)
+// timings (command cooldown is adjustable from the admin panel)
 let COOLDOWN_MS = 5000;
 const INACTIVITY_MS = 5 * 60 * 1000;
 
@@ -45,7 +45,11 @@ function getState(guildId) {
       // lifecycle
       disconnecting: false,
       onPlayerEnd: null,
+      onPlayerClosed: null,
+      onPlayerException: null,
+      onPlayerStuck: null,
       playerListenerTarget: null,
+      trackSeq: 0, // bumped every time a track starts (failure fallback uses it)
 
       // per-user button cooldowns
       buttonCooldowns: new Map(),
@@ -61,7 +65,15 @@ function getState(guildId) {
 }
 
 /**
- * Cooldown check (PER GUILD — exactly like old code)
+ * Existing guild state or undefined — for read-only callers that must not
+ * create an entry (voice updates, admin polling, timers).
+ */
+function peekState(guildId) {
+  return guildState.get(guildId);
+}
+
+/**
+ * Cooldown check (per guild, not per user)
  */
 function checkCooldown(guildId) {
   const state = getState(guildId);
@@ -154,6 +166,7 @@ function clearState(guildId) {
 
 module.exports = {
   getState,
+  peekState,
   checkCooldown,
   getCommandCooldownMs,
   setCommandCooldownMs,

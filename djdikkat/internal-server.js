@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Internal HTTP server
  * Localhost-only API so admin-api can trigger bot actions
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 const http = require('http');
@@ -10,10 +10,11 @@ const { sendCustomToAll, sendAnnouncement, sendOwnerWelcome } = require('./annou
 const { cleanDms, scanAndCleanDms } = require('./dm-store');
 const { getGuildMemory, getGuildMessagesRaw, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } = require('./memory');
 const { getGuildStatsRaw } = require('./stats');
-const { getState, getActiveVoiceCount, getActiveGuildIds, getCommandCooldownMs, setCommandCooldownMs } = require('./state');
+const { peekState, getActiveVoiceCount, getCommandCooldownMs, setCommandCooldownMs } = require('./state');
 const { clearLogFile, getLogLevel, setLogLevel } = require('./logger');
 const { getMaintenance, setMaintenance } = require('./runtime-flags');
 const { deployCommands, getButtonCooldownMs, setButtonCooldownMs } = require('./commands');
+const { getConfig, setConfig } = require('./config-store');
 
 const ACTIVITY_TYPES = {
   Playing:   ActivityType.Playing,
@@ -24,11 +25,34 @@ const ACTIVITY_TYPES = {
 
 const ACTIVITY_NAMES = { 0: 'Playing', 2: 'Listening', 3: 'Watching', 5: 'Competing' };
 
-// Snapshot of whatever presence was live right before maintenance mode was
-// switched on, so switching it off restores the exact old title card instead
-// of resetting to some generic default. In-memory only — a restart mid-
-// maintenance loses it, same as the maintenance flag itself.
-let savedPresence = null;
+const MAINTENANCE_PRESENCE = {
+  status: 'idle', // Discord's yellow/away status
+  activities: [{ name: '🔨 Under Maintenance', type: ActivityType.Playing }]
+};
+
+// Presence to show at startup: the maintenance card if maintenance is on,
+// else whatever an admin last set, else null (caller uses its default).
+function startupPresence() {
+  if (getMaintenance().enabled) return MAINTENANCE_PRESENCE;
+  const p = getConfig('presence');
+  if (!p) return null;
+  const data = { status: p.status || 'online', activities: [] };
+  if (p.text && p.type && ACTIVITY_TYPES[p.type] !== undefined) {
+    data.activities = [{ name: p.text, type: ACTIVITY_TYPES[p.type] }];
+  }
+  return data;
+}
+
+// client.user.setPresence() is synchronous in discord.js v14 (returns the
+// ClientPresence, not a Promise). Guarded so a bad presence payload can't
+// abort whatever the caller does next.
+function applyPresence(client, data) {
+  try {
+    client.user.setPresence(data);
+  } catch (err) {
+    console.warn(`[PRESENCE] Could not set presence: ${err.message}`);
+  }
+}
 
 function readBody(req) {
   return new Promise(resolve => {
@@ -51,15 +75,15 @@ function startInternalServer(client, port = 3001) {
         const { getRecoveryStats } = require('./player');
         const recoveryStats = getRecoveryStats();
         const guilds = [...client.guilds.cache.values()].map(g => {
-          const state = getState(g.id);
+          const state = peekState(g.id);
           return {
             id: g.id, name: g.name, memberCount: g.memberCount,
             icon: g.iconURL({ size: 64 }) || null,
             joinedAt: g.joinedAt?.toISOString() || null,
-            playing: !!state.current,
-            paused: state.paused || false,
-            currentTrack: state.current?.info?.title || null,
-            voiceChannelId: state.voiceChannelId || null,
+            playing: !!state?.current,
+            paused: state?.paused || false,
+            currentTrack: state?.current?.info?.title || null,
+            voiceChannelId: state?.voiceChannelId || null,
             recoveryAttempts1h: recoveryStats[g.id] || 0
           };
         }).sort((a, b) => a.name.localeCompare(b.name));
@@ -88,14 +112,24 @@ function startInternalServer(client, port = 3001) {
       if (req.method === 'POST' && req.url === '/presence') {
         const { type, text, status } = await readBody(req);
         const presenceData = { status: status || 'online', activities: [] };
-        if (text && type && ACTIVITY_TYPES[type] !== undefined) {
+        const hasActivity  = text && type && ACTIVITY_TYPES[type] !== undefined;
+        if (hasActivity) {
           presenceData.activities = [{ name: text.trim(), type: ACTIVITY_TYPES[type] }];
         }
-        await client.user.setPresence(presenceData);
+        client.user.setPresence(presenceData);
+        setConfig('presence', {
+          status: presenceData.status,
+          type:   hasActivity ? type : null,
+          text:   hasActivity ? text.trim() : null
+        });
         return send(200, { ok: true });
       }
 
       // ── GET/POST /maintenance ─────────────────────────────────
+      // While maintenance mode is on, the presence that was live right before it
+      // is kept in bot_config 'savedPresence', so switching it off restores the
+      // exact old title card instead of resetting to some generic default — even
+      // across a restart mid-maintenance.
       if (req.method === 'GET' && req.url === '/maintenance') {
         return send(200, getMaintenance());
       }
@@ -109,30 +143,29 @@ function startInternalServer(client, port = 3001) {
           // the maintenance presence (idle = Discord's yellow/away status).
           const presence = client.user?.presence;
           const activity = presence?.activities?.[0];
-          savedPresence = {
+          setConfig('savedPresence', {
             status: presence?.status && presence.status !== 'offline' ? presence.status : 'online',
             type: activity ? (ACTIVITY_NAMES[activity.type] || null) : null,
             text: activity?.name || null
-          };
-          await client.user.setPresence({
-            status: 'idle',
-            activities: [{ name: '🔨 Under Maintenance', type: ActivityType.Playing }]
-          }).catch(() => {});
+          });
+          applyPresence(client, MAINTENANCE_PRESENCE);
         } else if (!now && was) {
           // Turning off: restore exactly what was captured. If there's
-          // nothing saved (e.g. the bot restarted mid-maintenance), leave
-          // presence alone rather than guessing at a default.
+          // nothing saved, leave presence alone rather than guessing.
+          const savedPresence = getConfig('savedPresence');
           if (savedPresence) {
             const presenceData = { status: savedPresence.status, activities: [] };
             if (savedPresence.text && savedPresence.type && ACTIVITY_TYPES[savedPresence.type] !== undefined) {
               presenceData.activities = [{ name: savedPresence.text, type: ACTIVITY_TYPES[savedPresence.type] }];
             }
-            await client.user.setPresence(presenceData).catch(() => {});
+            applyPresence(client, presenceData);
           }
-          savedPresence = null;
+          setConfig('savedPresence', null);
         }
 
-        return send(200, setMaintenance(enabled, message));
+        const result = setMaintenance(enabled, message);
+        setConfig('maintenance', result);
+        return send(200, result);
       }
 
       // ── POST /deploy-commands ─────────────────────────────────
@@ -156,10 +189,12 @@ function startInternalServer(client, port = 3001) {
         const { commandCooldownMs, buttonCooldownMs } = await readBody(req);
         if (commandCooldownMs !== undefined) setCommandCooldownMs(commandCooldownMs);
         if (buttonCooldownMs !== undefined) setButtonCooldownMs(buttonCooldownMs);
-        return send(200, {
+        const cooldowns = {
           commandCooldownMs: getCommandCooldownMs(),
           buttonCooldownMs: getButtonCooldownMs()
-        });
+        };
+        setConfig('cooldowns', cooldowns);
+        return send(200, cooldowns);
       }
 
       // ── GET/POST /log-level ────────────────────────────────────
@@ -168,7 +203,9 @@ function startInternalServer(client, port = 3001) {
       }
       if (req.method === 'POST' && req.url === '/log-level') {
         const { level } = await readBody(req);
-        return send(200, { level: setLogLevel(level) });
+        const now = setLogLevel(level);
+        setConfig('logLevel', now);
+        return send(200, { level: now });
       }
 
       // ── POST /logs/bot/clear ─────────────────────────────────
@@ -217,6 +254,35 @@ function startInternalServer(client, port = 3001) {
         if (req.method === 'GET' && sub === '/settings') {
           const mem = getGuildMemory(guildId);
           return send(200, { settings: mem?.settings || {} });
+        }
+
+        // Pinned announcement channel (null = automatic: last command channel).
+        if (req.method === 'POST' && sub === '/settings') {
+          const { announceChannelId } = await readBody(req);
+          if (announceChannelId !== undefined) {
+            if (announceChannelId && !/^\d{17,20}$/.test(String(announceChannelId))) {
+              return send(400, { error: 'Invalid channel ID' });
+            }
+            await setGuildSettings(guildId, { announceChannelId: announceChannelId || null });
+          }
+          return send(200, { settings: getGuildMemory(guildId).settings });
+        }
+
+        // Text channels the bot can post in — for the admin panel's channel picker.
+        if (req.method === 'GET' && sub === '/channels') {
+          const guild = client.guilds.cache.get(guildId);
+          if (!guild) return send(404, { error: 'Bot is not in this server' });
+          const me = guild.members.me;
+          const channels = [...guild.channels.cache.values()]
+            .filter(c => c.isTextBased?.() && !c.isThread?.() && !c.isVoiceBased?.())
+            .map(c => ({
+              id: c.id,
+              name: c.name,
+              position: c.rawPosition ?? 0,
+              canSend: !!(me && c.permissionsFor(me)?.has(['ViewChannel', 'SendMessages']))
+            }))
+            .sort((a, b) => a.position - b.position);
+          return send(200, { channels });
         }
 
         if (req.method === 'GET' && sub === '/data') {
@@ -324,4 +390,4 @@ function startInternalServer(client, port = 3001) {
   return server;
 }
 
-module.exports = { startInternalServer };
+module.exports = { startInternalServer, startupPresence };

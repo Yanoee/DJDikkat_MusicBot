@@ -2,50 +2,43 @@
  * DJ DIKKAT - DM Store
  * Tracks message IDs of DMs the bot sends so they can be
  * bulk-deleted later via the admin panel "Clean DMs" button.
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 
-const fs   = require('fs');
-const path = require('path');
-const fsp  = fs.promises;
+const db = require('./db');
 
-const FILE       = path.join(__dirname, 'data', 'dm-track.json');
 const MAX_ENTRIES = 500;
 
-let cache = null;
+let cache = [];
 
-function load() {
-  if (cache) return cache;
-  try {
-    if (fs.existsSync(FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      cache = Array.isArray(parsed) ? parsed : [];
-    } else {
-      cache = [];
-    }
-  } catch { cache = []; }
-  return cache;
-}
-
-async function persist() {
-  try {
-    await fsp.mkdir(path.dirname(FILE), { recursive: true });
-    await fsp.writeFile(FILE, JSON.stringify(cache, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[dm-store] Failed to save:', err.message);
-  }
+async function loadAll() {
+  const rows = await db.query(
+    'SELECT channel_id, message_id, type, created_at FROM dm_messages ORDER BY id DESC LIMIT ?',
+    [MAX_ENTRIES]
+  );
+  cache = rows.map(r => ({ channelId: r.channel_id, messageId: r.message_id, type: r.type, ts: db.toIso(r.created_at) }));
+  return cache.length;
 }
 
 async function trackDm(channelId, messageId, type = 'dm') {
-  load();
-  cache.unshift({ channelId, messageId, type, ts: new Date().toISOString() });
+  const ts = new Date();
+  cache.unshift({ channelId, messageId, type, ts: ts.toISOString() });
   if (cache.length > MAX_ENTRIES) cache.length = MAX_ENTRIES;
-  await persist();
+  db.background((async () => {
+    await db.query(
+      'INSERT INTO dm_messages (channel_id, message_id, type, created_at) VALUES (?, ?, ?, ?)',
+      [channelId, messageId, String(type).slice(0, 32), ts]
+    );
+    // keep the newest MAX_ENTRIES rows
+    await db.query(
+      'DELETE FROM dm_messages WHERE id <= (SELECT id FROM (SELECT id FROM dm_messages ORDER BY id DESC LIMIT 1 OFFSET ?) t)',
+      [MAX_ENTRIES]
+    );
+  })(), 'track DM');
 }
 
 async function cleanDms(client) {
-  load();
   let deleted = 0;
   let failed  = 0;
   const keep  = [];
@@ -54,7 +47,7 @@ async function cleanDms(client) {
     try {
       const channel = client.channels.cache.get(entry.channelId)
         || await client.channels.fetch(entry.channelId).catch(() => null);
-      if (!channel) { failed++; continue; }
+      if (!channel) { failed++; keep.push(entry); continue; } // unreachable — retry next time
       const msg = await channel.messages.fetch(entry.messageId).catch(() => null);
       if (msg) {
         await msg.delete();
@@ -63,12 +56,13 @@ async function cleanDms(client) {
       // message gone (deleted now or already gone) — don't keep in list
     } catch {
       failed++;
-      keep.push(entry); // unreachable channel — keep for next attempt
+      keep.push(entry); // delete failed — keep for next attempt
     }
   }
 
+  const done = cache.filter(e => !keep.includes(e)).map(e => e.messageId);
   cache = keep;
-  await persist();
+  if (done.length) await db.query('DELETE FROM dm_messages WHERE message_id IN (?)', [done]);
   return { deleted, failed };
 }
 
@@ -111,9 +105,9 @@ async function scanAndCleanDms(client) {
 
   // Also wipe the tracked list since we've now done a full sweep
   cache = [];
-  await persist();
+  await db.query('DELETE FROM dm_messages');
 
   return { deleted, failed, scanned: scanned.size };
 }
 
-module.exports = { trackDm, cleanDms, scanAndCleanDms };
+module.exports = { loadAll, trackDm, cleanDms, scanAndCleanDms };

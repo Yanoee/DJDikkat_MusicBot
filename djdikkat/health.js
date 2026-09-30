@@ -2,17 +2,15 @@
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 
 const os   = require('os');
-const fs   = require('fs');
-const path = require('path');
+const db   = require('./db');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getInactivityRemaining, getActiveVoiceCount } = require('./state');
-
-const LAST_UPDATE_FILE = path.join(__dirname, 'data', 'last-update.json');
+const { formatMs } = require('./ui');
 
 // ── Formatters ────────────────────────────────────────────
 
@@ -36,16 +34,6 @@ function formatUptime(seconds) {
   if (m) parts.push(`${m}m`);
   parts.push(`${s}s`);
   return parts.join(' ');
-}
-
-function formatMs(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return '0:00';
-  const total = Math.floor(ms / 1000);
-  const s = total % 60;
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function timeAgo(dateStr) {
@@ -82,11 +70,16 @@ function averageCpuPercent() {
 
 // ── External service checks ───────────────────────────────
 
-function loadLastUpdate() {
+async function loadLastUpdate() {
   try {
-    if (!fs.existsSync(LAST_UPDATE_FILE)) return null;
-    const data = JSON.parse(fs.readFileSync(LAST_UPDATE_FILE, 'utf8'));
-    return data && data.timestamp ? data : null;
+    const [row] = await db.query('SELECT * FROM update_history ORDER BY ts DESC, id DESC LIMIT 1');
+    if (!row) return null;
+    return {
+      timestamp: db.toIso(row.ts),
+      status:    row.status,
+      failedAt:  row.failed_at,
+      nodelink:  { updated: !!row.nodelink_updated, commitBefore: row.commit_before, commitAfter: row.commit_after }
+    };
   } catch {
     return null;
   }
@@ -126,7 +119,7 @@ async function buildHealthEmbed(client, state, meta, node) {
     return rem ? formatMs(rem) : '—';
   })();
 
-  const lastUpdate = loadLastUpdate();
+  const lastUpdate = await loadLastUpdate();
 
   const embed = new EmbedBuilder()
     .setTitle('🩺 DJ DIKKAT Health')
@@ -144,9 +137,11 @@ async function buildHealthEmbed(client, state, meta, node) {
   );
 
   // ── NodeLink ──────────────────────────────────────────────
+  // `node` comes from pickNode(), which only returns a CONNECTED node; a node
+  // Shoukaku still knows about but isn't connected to is mid-reconnect.
   const nodeState   = node
-    ? (node.state === 2 ? '🟢 Connected' : '🟡 Reconnecting')
-    : '🔴 Unavailable';
+    ? '🟢 Connected'
+    : (client.shoukaku?.nodes?.size ? '🟡 Reconnecting' : '🔴 Unavailable');
   const nodePing    = nodeStats && Number.isFinite(nodeStats.ping)
     ? `${nodeStats.ping}ms` : '—';
   const nodePlayers = nodeStats && Number.isFinite(nodeStats.players)

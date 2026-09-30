@@ -1,8 +1,9 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * Runtime flags
- * In-memory, admin-toggleable switches (reset on restart)
- * Build 4.0.0
+ * Admin-toggleable maintenance switch (persisted via config-store,
+ * restored at startup by index.js)
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 

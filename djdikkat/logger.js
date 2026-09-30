@@ -3,7 +3,7 @@
  * Logger
  * Timestamped console output — patches global console
  * Writes to stdout and a zip-archived, per-run rotating log file
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 const util = require('util');
@@ -63,7 +63,7 @@ function writeFile(line) {
     try {
       if (fs.statSync(LOG_FILE).size > LOG_MAX) {
         _logStream.end(); _logStream = null;
-        archiveNow(); // same zip-archive path as a restart, not a throwaway .1
+        archiveNow(); // same zip-archive path as a restart
       }
     } catch {}
   }
@@ -132,28 +132,18 @@ function zipInPlace(logPath) {
 
 // Shared by both the startup rotation and the mid-run 20MB size trigger, so
 // there's exactly one path a log file ever leaves through — archived and
-// zipped, tracked by the Log Archives panel — instead of two (this one, plus
-// the old throwaway .1 rename that bypassed archiving entirely).
-function archiveNow(sourceFile = LOG_FILE) {
+// zipped, tracked by the Log Archives panel.
+function archiveNow() {
   try {
-    if (!fs.existsSync(sourceFile) || fs.statSync(sourceFile).size === 0) return;
+    if (!fs.existsSync(LOG_FILE) || fs.statSync(LOG_FILE).size === 0) return;
     fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
     const archived = path.join(ARCHIVE_DIR, `bot-${stamp()}.log`);
-    fs.renameSync(sourceFile, archived);
+    fs.renameSync(LOG_FILE, archived);
     zipInPlace(archived);
     pruneArchive();
   } catch {}
 }
-
-function rotateOnStartup() {
-  archiveNow();
-  // One-time migration: a leftover bot.log.1 from before this fix used to be
-  // silently deleted here with no archiving at all. Archive it properly
-  // instead so nothing already on disk gets lost.
-  const staleBackup = `${LOG_FILE}.1`;
-  if (fs.existsSync(staleBackup)) archiveNow(staleBackup);
-}
-rotateOnStartup();
+archiveNow();
 
 // ── Clear log file ────────────────────────────────────────────
 // Truncates in place (safe even with _logStream open in append mode —
@@ -161,8 +151,6 @@ rotateOnStartup();
 function clearLogFile() {
   try {
     if (fs.existsSync(LOG_FILE)) fs.truncateSync(LOG_FILE, 0);
-    const rotated = `${LOG_FILE}.1`;
-    if (fs.existsSync(rotated)) fs.unlinkSync(rotated);
     _writeCount = 0;
     return true;
   } catch (err) {

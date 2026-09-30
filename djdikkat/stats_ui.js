@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats UI
  * Per-guild stats embed builder
- * Build 4.0.0
+ * Build 5.0.0
  * Author: Yanoee
  ************************************************************/
 
@@ -136,6 +136,5 @@ function buildStatsChannelMessage(guildId) {
 }
 
 module.exports = {
-  buildStatsEmbed,
   buildStatsChannelMessage
 };

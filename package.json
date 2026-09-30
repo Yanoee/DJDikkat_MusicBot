@@ -1,11 +1,12 @@
 {
   "name": "djdikkat",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "🎵 Dakka Records INC.",
-  "main": "djdikkat/index.js",
+  "type": "module",
+  "main": "djdikkat/index.ts",
   "scripts": {
-    "start": "node djdikkat/index.js",
-    "dev": "node djdikkat/index.js"
+    "start": "node djdikkat/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "discord",
@@ -19,12 +20,15 @@
   "author": "Yanoee",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24"
   },
   "dependencies": {
-    "discord.js": "^14.25.1",
-    "dotenv": "^17.2.3",
-    "mysql2": "^3.15.0",
-    "shoukaku": "^4.2.0"
+    "discord.js": "^14.27.0",
+    "mysql2": "^3.24.5",
+    "shoukaku": "^4.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
   }
 }

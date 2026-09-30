@@ -1,7 +1,7 @@
 ![Logo](https://images2.imgbox.com/6c/31/E8jm3ZKg_o.png)
 
 [![License](https://img.shields.io/badge/License-MIT-yellow)](https://github.com/Yanoee/DJDikkat_MusicBot/blob/main/LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A518-green?logo=node.js)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A524-green?logo=node.js)](https://nodejs.org/)
 [![Discord.js](https://img.shields.io/badge/discord.js-v14-blue?logo=discord)](https://discord.js.org/)
 [![NodeLink](https://img.shields.io/badge/NodeLink-Audio-purple)](https://github.com/PerformanC/NodeLink)
 [![Shoukaku](https://img.shields.io/badge/Shoukaku-v4-orange)](https://github.com/Deivu/Shoukaku)
@@ -90,14 +90,13 @@ When music is playing, a rich embed appears in your text channel:
 ## 🛠 Tech Stack
 
 - **Debian 12 (Bookworm)** - production server environment
-- **Node.js ≥ 18** - runtime
+- **Node.js ≥ 24** - runtime, runs the TypeScript directly (type stripping, no build step)
 - **Discord.js v14** - Discord API wrapper
 - **Shoukaku v4** - NodeLink/Lavalink client for Node.js
 - **NodeLink** - audio streaming backend
 - **Spotify Web API** - track metadata and resolution for Spotify links
 - **MariaDB 10.11** + **mysql2** - persistent storage
-- **dotenv** - environment variable management
-- **Plain JavaScript** - no framework, no bloat
+- **TypeScript** - strict, type-checked with `npm run typecheck`; no framework, no bloat
 
 ### 🗄 Database setup (self-hosting)
 
@@ -110,7 +109,7 @@ GRANT ALL PRIVILEGES ON djdikkat.* TO 'djdikkat'@'localhost';
 ```
 
 Add to `djdikkat/.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Tables are created on first start.
-Upgrading from v4 (JSON)? Stop the bot and run `node djdikkat/scripts/import-json.js` once — it imports `djdikkat/data/` and verifies the counts.
+Then `npm install` and `npm start` (reads `djdikkat/.env`). `npm run typecheck` runs the TypeScript compiler without emitting anything.
 
 ---
 

@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Internal HTTP server
  * Localhost-only API so admin-api can trigger bot actions
- * Build 5.3.1
+ * Build 5.3.2
  * Author: Yanoee
  ************************************************************/
 import http from 'node:http';
@@ -54,21 +54,47 @@ function currentPresence(client: Client<true>): PresenceConfig {
   return {
     status: status !== 'offline' ? status : 'online',
     type: activity ? ACTIVITY_NAMES[activity.type] ?? null : null,
-    text: activity?.name ?? null
+    text: activity?.state ?? activity?.name ?? null // custom status keeps its text in state
   };
-}
-
-// Presence to show at startup: the maintenance card if maintenance is on,
-// else whatever an admin last set, else null (caller uses its default).
-export function startupPresence(): PresenceData | null {
-  if (getMaintenance().enabled) return MAINTENANCE_PRESENCE;
-  const p = getConfig('presence');
-  return p ? toPresenceData(p) : null;
 }
 
 // Guarded so a bad presence payload can't abort whatever the caller does next.
 function applyPresence(client: Client<true>, data: PresenceData): void {
   try { client.user.setPresence(data); } catch (err) { console.warn(`[PRESENCE] Could not set presence: ${errMsg(err)}`); }
+}
+
+// ── Rotating status ───────────────────────────────────────
+// Shown while no admin presence is pinned and maintenance is off.
+// Discord allows ~5 presence updates a minute, so keep this ≥ 15s.
+const ROTATE_MS = 20_000;
+let rotateIndex = 0;
+
+function rotatingLines(client: Client<true>): string[] {
+  return [
+    '🎵 Dakka Records INC.',
+    `🏠 Used in ${client.guilds.cache.size} servers`,
+    `🎧 Playing in ${getActiveVoiceCount()} servers right now`,
+    '🌐 www.djdikkat.com',
+    '💡 /play to start'
+  ];
+}
+
+function rotatePresence(client: Client<true>): void {
+  if (getMaintenance().enabled || getConfig('presence')) return;
+  const lines = rotatingLines(client);
+  const state = lines[rotateIndex++ % lines.length];
+  applyPresence(client, { status: 'online', activities: [{ name: 'custom', state, type: ActivityType.Custom }] });
+}
+
+/** Startup presence: maintenance card, else the admin's pinned one, else the rotation. */
+export function startPresence(client: Client<true>): void {
+  if (getMaintenance().enabled) applyPresence(client, MAINTENANCE_PRESENCE);
+  else {
+    const p = getConfig('presence');
+    if (p) applyPresence(client, toPresenceData(p));
+  }
+  rotatePresence(client);
+  setInterval(() => rotatePresence(client), ROTATE_MS);
 }
 
 async function readBody(req: IncomingMessage): Promise<Body> {
@@ -139,7 +165,13 @@ function buildRoutes(client: Client<true>) {
     'POST /presence': ({ type, text, status }) => {
       const t = str(text);
       const hasActivity = !!t && typeof type === 'string' && type in ACTIVITY_TYPES;
-      const config: PresenceConfig = { status: str(status) || 'online', type: hasActivity ? type : null, text: hasActivity ? t : null };
+      if (!hasActivity) {
+        // No activity → unpin and go back to the rotating status.
+        setConfig('presence', null);
+        rotatePresence(client);
+        return [200, { ok: true }];
+      }
+      const config: PresenceConfig = { status: str(status) || 'online', type: type as string, text: t };
       client.user.setPresence(toPresenceData(config));
       setConfig('presence', config);
       return [200, { ok: true }];
@@ -152,15 +184,17 @@ function buildRoutes(client: Client<true>) {
     'POST /maintenance': ({ enabled, message }) => {
       const was = getMaintenance().enabled;
       if (enabled && !was) {
-        setConfig('savedPresence', currentPresence(client));
+        // Only a pinned presence needs saving; the rotation restarts by itself.
+        setConfig('savedPresence', getConfig('presence') ? currentPresence(client) : null);
         applyPresence(client, MAINTENANCE_PRESENCE);
       } else if (!enabled && was) {
-        // Nothing saved → leave presence alone rather than guessing.
         const saved = getConfig('savedPresence');
         if (saved) applyPresence(client, toPresenceData(saved));
         setConfig('savedPresence', null);
       }
-      return [200, setMaintenance(enabled, message)];
+      const result = setMaintenance(enabled, message);
+      if (!result.enabled && was) rotatePresence(client);
+      return [200, result];
     },
 
     'POST /deploy-commands': async () => {

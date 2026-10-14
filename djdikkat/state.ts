@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * State manager
  * Guild state and timers
- * Build 5.3.1
+ * Build 5.3.2
  * Author: Yanoee
  ************************************************************/
 import type { Client } from 'discord.js';

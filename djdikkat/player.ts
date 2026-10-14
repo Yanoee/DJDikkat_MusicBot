@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Player plug
  * Playback engine and NodeLink control
- * Build 5.3.1
+ * Build 5.3.2
  * Author: Yanoee
  ************************************************************/
 import { Constants } from 'shoukaku';

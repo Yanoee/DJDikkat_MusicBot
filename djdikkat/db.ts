@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * MariaDB connection pool
- * Build 5.3.1
+ * Build 5.3.2
  * Author: Yanoee
  *
  * Reads DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD

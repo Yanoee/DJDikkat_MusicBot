@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 5.3.1
+ * Build 5.3.2
  * Author: Yanoee
  ************************************************************/
 // djdikkat/.env is loaded by Node itself (--env-file-if-exists, see package.json
@@ -10,7 +10,7 @@
 // console patch runs before any other module.
 import { startHeartbeat, setLogLevel } from './logger.ts';
 
-import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
+import { Client, GatewayIntentBits, Events } from 'discord.js';
 import { Shoukaku, Connectors } from 'shoukaku';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -19,7 +19,7 @@ import { peekState, getActiveVoiceCount, getActiveGuildIds, setCommandCooldownMs
 import { disconnectGuild, handlePlayerFailure } from './player.ts';
 import { deleteMessage } from './ui.ts';
 import { sendAnnouncement, sendOwnerWelcome } from './announcement.ts';
-import { startInternalServer, startupPresence } from './internal-server.ts';
+import { startInternalServer, startPresence } from './internal-server.ts';
 import * as memory from './memory.ts';
 import * as db from './db.ts';
 import * as stats from './stats.ts';
@@ -107,10 +107,7 @@ client.once(Events.ClientReady, async readyClient => {
   } else {
     console.log('ℹ️  Command deploy skipped');
   }
-  readyClient.user.setPresence(startupPresence() ?? {
-    activities: [{ name: '🎵 Dakka Records INC.', type: ActivityType.Playing }],
-    status: 'online'
-  });
+  startPresence(readyClient);
 
   // Admin API + heartbeat first — the startup announcements below walk every
   // guild one by one and can take a while.

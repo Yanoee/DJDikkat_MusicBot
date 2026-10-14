@@ -4,7 +4,7 @@
  * Admin-set runtime settings persisted in the bot_config table
  * so they survive restarts. Values are JSON; the cache keeps
  * reads synchronous.
- * Build 5.3.1
+ * Build 5.3.2
  * Author: Yanoee
  ************************************************************/
 import * as db from './db.ts';

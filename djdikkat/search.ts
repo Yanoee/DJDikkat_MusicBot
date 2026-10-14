@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Search engine
  * Link cleanup + "what did the user mean" ranking for /play
- * Build 5.3.0
+ * Build 5.3.1
  * Author: Yanoee
  ************************************************************/
 import { LoadType } from 'shoukaku';

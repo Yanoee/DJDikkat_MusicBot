@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder (/health)
- * Build 5.3.0
+ * Build 5.3.1
  * Author: Yanoee
  ************************************************************/
 import os from 'node:os';

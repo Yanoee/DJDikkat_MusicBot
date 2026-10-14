@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * Shared types
- * Build 5.3.0
+ * Build 5.3.1
  * Author: Yanoee
  ************************************************************/
 import type { Shoukaku, Track } from 'shoukaku';

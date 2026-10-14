@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 5.3.0
+ * Build 5.3.1
  * Author: Yanoee
  ************************************************************/
 import {

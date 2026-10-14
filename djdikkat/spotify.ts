@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Spotify resolver
  * Spotify URL -> title, artist and duration for the search engine
- * Build 5.3.0
+ * Build 5.3.1
  * Author: Yanoee
  ************************************************************/
 import { AppError, UserError, errMsg } from './errors.ts';

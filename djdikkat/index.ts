@@ -2,12 +2,12 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 5.3.0
+ * Build 5.3.1
  * Author: Yanoee
  ************************************************************/
-// ESM evaluates imports in order: .env first, then the logger's console patch,
-// before any other module runs.
-import './env.ts';
+// djdikkat/.env is loaded by Node itself (--env-file-if-exists, see package.json
+// and the systemd unit). ESM evaluates imports in order, so the logger's
+// console patch runs before any other module.
 import { startHeartbeat, setLogLevel } from './logger.ts';
 
 import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';

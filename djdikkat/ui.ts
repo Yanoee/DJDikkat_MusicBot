@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Player card
  * The "Now Playing" / idle card and its buttons
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
@@ -42,14 +42,14 @@ export function formatMs(ms: number): string {
 /** Fetch + delete one message by ID. Every failure is swallowed; true if deleted. */
 export async function deleteMessage(client: Client | null, channelId: string, messageId: string): Promise<boolean> {
   if (!client) return false;
-  const channel = client.channels.cache.get(channelId) ?? await client.channels.fetch(channelId).catch(() => null);
+  const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased()) return false;
   const msg = await channel.messages.fetch(messageId).catch(() => null);
   return msg ? msg.delete().then(() => true, () => false) : false;
 }
 
 async function fetchSendable(client: Client, channelId: string): Promise<SendableChannels | null> {
-  const channel = client.channels.cache.get(channelId) ?? await client.channels.fetch(channelId).catch(() => null);
+  const channel = await client.channels.fetch(channelId).catch(() => null);
   return channel?.isSendable() ? channel : null;
 }
 
@@ -70,11 +70,11 @@ function getSourceKey(uri: string | null | undefined): Source {
   return 'default';
 }
 
+const SOURCE_LABELS: Partial<Record<Source, string>> = { youtube: 'YouTube', spotify: 'Spotify', soundcloud: 'SoundCloud' };
+
 function sourceLabel(uri: string | null | undefined): string {
-  const key = getSourceKey(uri);
-  if (key === 'youtube') return 'YouTube';
-  if (key === 'spotify') return 'Spotify';
-  if (key === 'soundcloud') return 'SoundCloud';
+  const label = SOURCE_LABELS[getSourceKey(uri)];
+  if (label) return label;
   try { return new URL(uri ?? '').hostname.replace(/^www\./, ''); } catch { return 'Unknown'; }
 }
 
@@ -169,7 +169,7 @@ async function resolveControllerMessage(guildId: string, client: Client | null):
   const { messageId, channelId } = getUiMessage(guildId);
   if (!client || !messageId || !channelId) return null;
 
-  const channel = client.channels.cache.get(channelId) ?? await client.channels.fetch(channelId).catch(() => null);
+  const channel = await client.channels.fetch(channelId).catch(() => null);
   const msg = channel?.isTextBased() ? await channel.messages.fetch(messageId).catch(() => null) : null;
   if (!msg) {
     clearUiMessage(guildId);

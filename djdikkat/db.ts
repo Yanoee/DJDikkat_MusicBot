@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Music Bot
  * MariaDB connection pool
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  *
  * Reads DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD
@@ -35,24 +35,6 @@ function getPool(): Pool {
 export async function query<T = unknown>(sql: string, params?: SqlParam[]): Promise<T> {
   const [rows] = await getPool().query(sql, params);
   return rows as T;
-}
-
-type QueryFn = <T = unknown>(sql: string, params?: SqlParam[]) => Promise<T>;
-
-/** Runs fn inside a transaction; its `query` has the same signature as query(). */
-export async function transaction<R>(fn: (tx: { query: QueryFn }) => Promise<R>): Promise<R> {
-  const conn = await getPool().getConnection();
-  try {
-    await conn.beginTransaction();
-    const result = await fn({ query: async <T,>(sql: string, params?: SqlParam[]) => (await conn.query(sql, params))[0] as T });
-    await conn.commit();
-    return result;
-  } catch (err) {
-    await conn.rollback().catch(() => {});
-    throw err;
-  } finally {
-    conn.release();
-  }
 }
 
 /**

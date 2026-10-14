@@ -82,6 +82,22 @@ test('Spotify duration picks the matching version', () => {
   assert.equal(best!.track.info.length, 204_000);
 });
 
+test('a one-letter typo still finds the song, over a title that copies the typo', () => {
+  const tracks = [track('Bohemain Rapsody- Queen (Cover)', 'Mejis', 311), track('Bohemian Rhapsody', 'Queen', 355)];
+  const [best] = rankCandidates('bohemain rapsody', tracks.map((t, rank) => ({ track: t, rank, source: 'ytm' as const })));
+  assert.equal(best!.track.info.author, 'Queen');
+  assert.ok(best!.coverage >= 0.7, `coverage ${best!.coverage}`);
+  // short words are never fuzzy: "end" must not match "and"
+  assert.equal(pick('in the end', [track('In and Out', 'Someone', 200), track('In the End', 'Linkin Park', 217)]), 'In the End | Linkin Park');
+});
+
+test('a query that is an artist name prefers that artist', () => {
+  assert.equal(pick('duman', [
+    track('Kafa Duman', 'Hünkar Göksu', 147),
+    track('Senden Daha Güzel', 'Duman', 270)
+  ]), 'Senden Daha Güzel | Duman');
+});
+
 test('normalizeLink', () => {
   const cases: [string, string | null][] = [
     ['https://www.youtube.com/watch?v=NAHRpEqgcL4&list=RDNAHRpEqgcL4&start_radio=1', 'https://www.youtube.com/watch?v=NAHRpEqgcL4'],
@@ -91,6 +107,8 @@ test('normalizeLink', () => {
     ['youtu.be/NAHRpEqgcL4?si=abc&list=PL1', 'https://youtu.be/NAHRpEqgcL4'],
     ['https://www.youtube.com/playlist?list=PLirAqAtl_h2r5g8xGajEwdXd3x1sZh8hC', 'https://www.youtube.com/playlist?list=PLirAqAtl_h2r5g8xGajEwdXd3x1sZh8hC'],
     ['https://open.spotify.com/track/0pqnGHJpmpxLKifKRmU6WP?si=123', 'https://open.spotify.com/track/0pqnGHJpmpxLKifKRmU6WP'],
+    ['spotify:track:0pqnGHJpmpxLKifKRmU6WP', 'https://open.spotify.com/track/0pqnGHJpmpxLKifKRmU6WP'],
+    ['spotify:artist:53XhwfbYqKCa1cC15pYq2q', 'https://open.spotify.com/artist/53XhwfbYqKCa1cC15pYq2q'],
     ['tarkan kuzu kuzu', null],
     ['ac/dc', null],
     ['despacito', null]

@@ -2,22 +2,14 @@
  * DJ DIKKAT - Music Bot
  * Errors
  * Structured application errors with codes + correlation IDs
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { randomBytes } from 'node:crypto';
 
-// Catalog of known error codes — the source of truth for what codes exist,
-// so call sites reuse the same vocabulary instead of inventing tags ad hoc.
-export const ErrorCodes = {
-  NODELINK_UNAVAILABLE: 'NODELINK_UNAVAILABLE',
-  RECOVERY_FAILED:      'RECOVERY_FAILED',
-  TRACK_EXCEPTION:      'TRACK_EXCEPTION',
-  TRACK_STUCK:          'TRACK_STUCK',
-  SPOTIFY_ERROR:        'SPOTIFY_ERROR',
-  UNEXPECTED:           'UNEXPECTED'
-} as const;
-export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
+// Every known error code — call sites reuse this vocabulary instead of
+// inventing tags ad hoc (the compiler rejects anything else).
+export type ErrorCode = 'NODELINK_UNAVAILABLE' | 'RECOVERY_FAILED' | 'TRACK_EXCEPTION' | 'TRACK_STUCK' | 'SPOTIFY_ERROR' | 'UNEXPECTED';
 
 /**
  * A deliberate, user-safe message — not a bug, just expected control flow
@@ -58,7 +50,7 @@ export class AppError extends Error {
 export function logError(err: unknown, fallbackContext: Record<string, unknown> = {}): AppError {
   const appErr = err instanceof AppError
     ? err
-    : new AppError(ErrorCodes.UNEXPECTED, err instanceof Error ? err.message : String(err), fallbackContext, err);
+    : new AppError('UNEXPECTED', err instanceof Error ? err.message : String(err), fallbackContext, err);
 
   const ctx = Object.keys(appErr.context).length ? ` ${JSON.stringify(appErr.context)}` : '';
   console.error(`❌ [${appErr.code}] ${appErr.message} (ref: ${appErr.ref})${ctx}`);

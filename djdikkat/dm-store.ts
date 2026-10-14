@@ -2,7 +2,7 @@
  * DJ DIKKAT - DM Store
  * Tracks message IDs of DMs the bot sends so they can be
  * bulk-deleted later via the admin panel "Clean DMs" button.
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { ChannelType } from 'discord.js';
@@ -47,8 +47,7 @@ export async function cleanDms(client: Client): Promise<{ deleted: number; faile
 
   for (const entry of cache) {
     try {
-      const channel = client.channels.cache.get(entry.channelId)
-        ?? await client.channels.fetch(entry.channelId).catch(() => null);
+      const channel = await client.channels.fetch(entry.channelId).catch(() => null);
       if (!channel?.isTextBased()) { failed++; keep.push(entry); continue; }
       const msg = await channel.messages.fetch(entry.messageId).catch(() => null);
       if (msg) { await msg.delete(); deleted++; }

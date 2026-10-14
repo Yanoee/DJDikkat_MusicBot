@@ -2,18 +2,18 @@
  * DJ DIKKAT - Music Bot
  * Player plug
  * Playback engine and NodeLink control
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { Constants } from 'shoukaku';
-import type { Node, Player, TrackEndEvent, WebSocketClosedEvent } from 'shoukaku';
+import type { Node, Player, TrackEndEvent, TrackExceptionEvent, TrackStuckEvent, WebSocketClosedEvent } from 'shoukaku';
 import type { Client, Guild, User } from 'discord.js';
 import { getState, peekState, clearInactivity, armInactivity, clearState } from './state.ts';
 import type { GuildState } from './state.ts';
 import { upsertController, removeController, repostController, deleteMessage } from './ui.ts';
 import { recordHistory, getStatsMessage, clearStatsMessage } from './memory.ts';
 import { recordPlay } from './stats.ts';
-import { UserError, AppError, ErrorCodes, logError, errMsg } from './errors.ts';
+import { UserError, AppError, logError, errMsg } from './errors.ts';
 import type { QueueTrack } from './types.ts';
 
 /** What ensurePlayer needs from a slash-command or button interaction. */
@@ -90,7 +90,7 @@ async function waitForNode(client: Client, timeoutMs = 2000, intervalMs = 200): 
   }
   if (!node) {
     const nodes = [...client.shoukaku.nodes.values()].map(n => ({ name: n.name, state: n.state }));
-    logError(new AppError(ErrorCodes.NODELINK_UNAVAILABLE, 'NodeLink node not ready after wait', { nodes }));
+    logError(new AppError('NODELINK_UNAVAILABLE', 'NodeLink node not ready after wait', { nodes }));
   } else {
     console.debug(`[NODE] picked node "${node.name}" after ${Date.now() - start}ms`);
   }
@@ -158,16 +158,27 @@ function scheduleFailureFallback(guildId: string, state: GuildState): void {
 
 function startRecovery(guildId: string): void {
   handlePlayerFailure(guildId, { reconnect: true }).catch(err =>
-    logError(new AppError(ErrorCodes.RECOVERY_FAILED, 'Recovery attempt crashed unexpectedly', { guildId }, err)));
+    logError(new AppError('RECOVERY_FAILED', 'Recovery attempt crashed unexpectedly', { guildId }, err)));
+}
+
+/** Unhooks our handlers from whichever player they're on. */
+function detachPlayerListeners(state: GuildState): void {
+  state.unlistenPlayer?.();
+  state.unlistenPlayer = null;
+  state.listenedPlayer = null;
 }
 
 /**
- * Create (once) the end/closed/exception/stuck listeners for a guild's player.
+ * Hooks the end/closed/exception/stuck handlers onto a guild's player (once
+ * per player; a different player first loses the old player's handlers).
  * closed    = Discord voice websocket dropped (node crash, session invalidated, etc.)
  * exception = track failed to load/play
  */
-function ensurePlayerHandlers(guildId: string, state: GuildState): void {
-  state.onPlayerEnd ??= async (endEvent: TrackEndEvent) => {
+function attachPlayerListeners(guildId: string, state: GuildState, player: Player): void {
+  if (state.listenedPlayer === player) return;
+  detachPlayerListeners(state);
+
+  const onEnd = async (endEvent: TrackEndEvent) => {
     if (state.disconnecting) return;
     const previous = state.current;
     const reason = String(endEvent.reason ?? '').toUpperCase();
@@ -195,7 +206,7 @@ function ensurePlayerHandlers(guildId: string, state: GuildState): void {
     await playNext(guildId);
   };
 
-  state.onPlayerClosed ??= async (closeEvent: WebSocketClosedEvent) => {
+  const onClosed = async (closeEvent: WebSocketClosedEvent) => {
     console.warn(`[VOICE CLOSED] guild=${guildId} code=${closeEvent.code} reason=${closeEvent.reason || 'unknown'}`);
     // 4014 = kicked, moved, channel deleted, or voice server changed. Discord
     // says don't blindly reconnect — look where the bot actually is now.
@@ -213,14 +224,14 @@ function ensurePlayerHandlers(guildId: string, state: GuildState): void {
     startRecovery(guildId);
   };
 
-  state.onPlayerException ??= (exceptionEvent) => {
-    logError(new AppError(ErrorCodes.TRACK_EXCEPTION, 'Track failed to load/play', { guildId, exception: exceptionEvent.exception }));
+  const onException = (exceptionEvent: TrackExceptionEvent) => {
+    logError(new AppError('TRACK_EXCEPTION', 'Track failed to load/play', { guildId, exception: exceptionEvent.exception }));
     // The follow-up end event (loadFailed) advances the queue.
     if (!state.disconnecting && state.player) scheduleFailureFallback(guildId, state);
   };
 
-  state.onPlayerStuck ??= async (stuckEvent) => {
-    logError(new AppError(ErrorCodes.TRACK_STUCK, 'Track playback stuck', {
+  const onStuck = async (stuckEvent: TrackStuckEvent) => {
+    logError(new AppError('TRACK_STUCK', 'Track playback stuck', {
       guildId, thresholdMs: stuckEvent.thresholdMs, track: state.current?.info.title ?? null
     }));
     if (state.disconnecting || !state.player) return;
@@ -228,33 +239,18 @@ function ensurePlayerHandlers(guildId: string, state: GuildState): void {
     // The resulting 'stopped' end event advances the queue.
     await state.player.stopTrack().catch(() => {});
   };
-}
 
-// Unhooks our handlers from the current player and forgets them, so the
-// next attachPlayerListeners() starts from a clean slate.
-function detachPlayerListeners(state: GuildState): void {
-  const player = state.player;
-  if (player) {
-    if (state.onPlayerEnd)       player.off('end', state.onPlayerEnd);
-    if (state.onPlayerClosed)    player.off('closed', state.onPlayerClosed);
-    if (state.onPlayerException) player.off('exception', state.onPlayerException);
-    if (state.onPlayerStuck)     player.off('stuck', state.onPlayerStuck);
-  }
-  state.onPlayerEnd = null;
-  state.onPlayerClosed = null;
-  state.onPlayerException = null;
-  state.onPlayerStuck = null;
-  state.playerListenerTarget = null;
-}
-
-function attachPlayerListeners(guildId: string, state: GuildState, player: Player): void {
-  ensurePlayerHandlers(guildId, state);
-  if (state.playerListenerTarget === player) return;
-  player.on('end', state.onPlayerEnd!);
-  player.on('closed', state.onPlayerClosed!);
-  player.on('exception', state.onPlayerException!);
-  player.on('stuck', state.onPlayerStuck!);
-  state.playerListenerTarget = player;
+  player.on('end', onEnd);
+  player.on('closed', onClosed);
+  player.on('exception', onException);
+  player.on('stuck', onStuck);
+  state.listenedPlayer = player;
+  state.unlistenPlayer = () => {
+    player.off('end', onEnd);
+    player.off('closed', onClosed);
+    player.off('exception', onException);
+    player.off('stuck', onStuck);
+  };
 }
 
 /** Aborted if something else (/disconnect, a fresh /play, …) took over the guild meanwhile. */
@@ -293,9 +289,15 @@ export async function handlePlayerFailure(guildId: string, { reconnect = false }
     return;
   }
 
+  // The final pass (no extra delay) is the last resort: NodeLink's "unassigned,
+  // will be reassigned on next request" has been observed NOT to reliably
+  // reassign — PATCH kept 404ing across all gentle attempts. A full teardown +
+  // fresh player is the code path every normal /play uses, so it's worth one
+  // real attempt before conceding.
   const attempts = RECONNECT_ATTEMPT_DELAYS_MS.length;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    await delay(RECONNECT_ATTEMPT_DELAYS_MS[attempt - 1]! + Math.random() * RECONNECT_JITTER_MS);
+  for (let attempt = 1; attempt <= attempts + 1; attempt++) {
+    const lastResort = attempt > attempts;
+    if (!lastResort) await delay(RECONNECT_ATTEMPT_DELAYS_MS[attempt - 1]! + Math.random() * RECONNECT_JITTER_MS);
     if (recoveryStale(guildId, state)) {
       console.debug(`[RECOVERY] guild=${guildId} — state changed underneath us, aborting recovery`);
       return;
@@ -310,44 +312,21 @@ export async function handlePlayerFailure(guildId: string, { reconnect = false }
       const node = await waitForNode(client, RECONNECT_NODE_WAIT_MS);
       if (state.player) return;
       if (!node) continue; // NodeLink still restarting — try again after the next delay
+      if (lastResort) await client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
       const player = await joinVoiceChannelSafely(client, guildId, state.voiceChannelId!, client.guilds.cache.get(guildId)?.shardId ?? 0);
       state.player = player;
       attachPlayerListeners(guildId, state, player);
-      console.log(`[RECOVERY] Rejoined voice for guild ${guildId} on attempt ${attempt}/${attempts}, resuming queue`);
+      const how = lastResort ? 'via full recreate (last resort)' : `on attempt ${attempt}/${attempts}`;
+      console.log(`[RECOVERY] Rejoined voice for guild ${guildId} ${how}, resuming queue`);
       await playNext(guildId);
       return;
     } catch (err) {
-      console.warn(`[RECOVERY] Attempt ${attempt}/${attempts} failed for guild ${guildId}: ${errMsg(err)}`);
-    }
-  }
-
-  // Last resort. NodeLink's "unassigned, will be reassigned on next request"
-  // has been observed NOT to reliably reassign — PATCH kept 404ing across all
-  // gentle attempts. A full teardown + fresh player is the code path every
-  // normal /play uses, so it's worth one real attempt before conceding.
-  if (recoveryStale(guildId, state)) return;
-  if (humansInVoice(state, guildId)) {
-    try {
-      const client = state.client!;
-      const node = await waitForNode(client, RECONNECT_NODE_WAIT_MS);
-      if (node && !state.player) {
-        await client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
-        const player = await client.shoukaku.joinVoiceChannel({
-          guildId, channelId: state.voiceChannelId!, shardId: client.guilds.cache.get(guildId)?.shardId ?? 0, deaf: true
-        });
-        state.player = player;
-        attachPlayerListeners(guildId, state, player);
-        console.log(`[RECOVERY] Rejoined guild ${guildId} via full recreate (last resort), resuming queue`);
-        await playNext(guildId);
-        return;
-      }
-    } catch (err) {
-      console.warn(`[RECOVERY] Last-resort full recreate also failed for guild ${guildId}: ${errMsg(err)}`);
+      console.warn(`[RECOVERY] ${lastResort ? 'Last-resort full recreate' : `Attempt ${attempt}/${attempts}`} failed for guild ${guildId}: ${errMsg(err)}`);
     }
   }
 
   logError(new AppError(
-    ErrorCodes.RECOVERY_FAILED,
+    'RECOVERY_FAILED',
     `Gave up reconnecting after ${attempts} gentle attempts + one full recreate — likely a NodeLink-side bug in its worker-crash player reassignment (check journalctl -u nodelink around this time)`,
     { guildId }
   ));
@@ -385,7 +364,7 @@ export async function ensurePlayer(interaction: GuildInteraction): Promise<Playe
   state.client = client;
 
   if (!await waitForNode(client)) {
-    throw new AppError(ErrorCodes.NODELINK_UNAVAILABLE, 'NodeLink is not available right now — please try again in a moment.', { guildId });
+    throw new AppError('NODELINK_UNAVAILABLE', 'NodeLink is not available right now — please try again in a moment.', { guildId });
   }
 
   const player = await joinVoiceChannelSafely(client, guildId, memberChannelId, guild.shardId);
@@ -437,7 +416,7 @@ async function playOrReset(guildId: string, state: GuildState, encoded: string):
     await state.player.playTrack({ track: { encoded }, paused: false });
     return true;
   } catch (err) {
-    logError(new AppError(ErrorCodes.TRACK_EXCEPTION, 'playTrack failed — resetting player', { guildId }, err));
+    logError(new AppError('TRACK_EXCEPTION', 'playTrack failed — resetting player', { guildId }, err));
     await handlePlayerFailure(guildId);
     return false;
   }

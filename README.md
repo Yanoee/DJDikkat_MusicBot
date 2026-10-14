@@ -22,9 +22,9 @@ No ads. No premium. No BS. Built by one person, free for everyone.
 ## 🔧 Features
 
 - **Multi-source playback** - Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
-- **Smart search** - `/play` suggests the top matches while you type; pick one to play exactly that track. Plain-text searches trust YouTube Music's ranking, match whole words (Turkish letters optional: `baris manco donence` finds *Dönence*), and skip covers, remixes, live and nightcore versions unless you ask for them.
+- **Smart search** - `/play` suggests the top matches while you type; pick one to play exactly that track. Plain-text searches trust YouTube Music's ranking, match whole words (Turkish letters optional: `baris manco donence` finds *Dönence*), forgive a typo in longer words (`bohemain rapsody` finds *Bohemian Rhapsody*), prefer the artist when you type just an artist's name, and skip covers, remixes, live and nightcore versions unless you ask for them.
 - **Clean links** - A video link opened from a Mix or playlist plays just that video. Mobile and `https://`-less links work, and a broken or unsupported link tells you why instead of playing something random.
-- **Spotify support** - Resolves Spotify tracks, albums, and full playlists to YouTube via the Spotify Web API. No Spotify premium account needed on your end.
+- **Spotify support** - Resolves Spotify tracks, albums, playlists, and artists (their top tracks) to YouTube via the Spotify Web API. `spotify:track:…` URIs from the desktop app work too. Playlists made by Spotify itself (e.g. *Today's Top Hits*) are closed to bots by Spotify, and the bot says so. No Spotify premium account needed on your end.
 - **Interactive player card** - A persistent embed in your text channel with live controls. No need to type commands - everything is a button click.
 - **3-state loop** - Cycles Off ~ Track ~ Queue ~ Off. Toggle any time with the loop button on the player card.
 - **Queue shuffle** - Fisher-Yates shuffle applied instantly, reflected live in the card.

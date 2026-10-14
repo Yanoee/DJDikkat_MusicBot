@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Health reporter
  * DM health embed builder (/health)
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import os from 'node:os';
@@ -13,6 +13,7 @@ import * as db from './db.ts';
 import { getInactivityRemaining, getActiveVoiceCount } from './state.ts';
 import type { GuildState } from './state.ts';
 import { formatMs } from './ui.ts';
+import { formatUptime } from './logger.ts';
 import type { getStatsMeta } from './stats.ts';
 
 function formatBytes(bytes: number): string {
@@ -21,14 +22,6 @@ function formatBytes(bytes: number): string {
   let b = bytes;
   while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
   return `${b.toFixed(1)} ${units[i]}`;
-}
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds / 3600) % 24);
-  const m = Math.floor((seconds / 60) % 60);
-  const s = Math.floor(seconds % 60);
-  return [d && `${d}d`, h && `${h}h`, m && `${m}m`, `${s}s`].filter(Boolean).join(' ');
 }
 
 function timeAgo(date: Date | string | null): string {

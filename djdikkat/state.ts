@@ -2,11 +2,11 @@
  * DJ DIKKAT - Music Bot
  * State manager
  * Guild state and timers
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import type { Client } from 'discord.js';
-import type { Player, TrackEndEvent, TrackExceptionEvent, TrackStuckEvent, WebSocketClosedEvent } from 'shoukaku';
+import type { Player } from 'shoukaku';
 import type { LastPlayed, QueueTrack } from './types.ts';
 
 export interface GuildState {
@@ -29,11 +29,8 @@ export interface GuildState {
 
   // lifecycle
   disconnecting: boolean;
-  onPlayerEnd: ((e: TrackEndEvent) => void) | null;
-  onPlayerClosed: ((e: WebSocketClosedEvent) => void) | null;
-  onPlayerException: ((e: TrackExceptionEvent) => void) | null;
-  onPlayerStuck: ((e: TrackStuckEvent) => void) | null;
-  playerListenerTarget: Player | null;
+  listenedPlayer: Player | null;          // player our end/closed/exception/stuck handlers are on
+  unlistenPlayer: (() => void) | null;     // removes those handlers
   trackSeq: number; // bumped every time a track starts (failure fallback uses it)
 
   buttonCooldowns: Map<string, number>; // userId -> until
@@ -47,10 +44,14 @@ const guildState = new Map<string, GuildState>();
 let COOLDOWN_MS = 5000;
 const INACTIVITY_MS = 5 * 60 * 1000;
 
+/** An admin-panel cooldown value clamped to 0–60s, or `current` if it isn't a valid number. */
+export function clampCooldownMs(ms: unknown, current: number): number {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? Math.min(ms, 60000) : current;
+}
+
 export function getCommandCooldownMs(): number { return COOLDOWN_MS; }
 export function setCommandCooldownMs(ms: unknown): number {
-  if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) COOLDOWN_MS = Math.min(ms, 60000);
-  return COOLDOWN_MS;
+  return COOLDOWN_MS = clampCooldownMs(ms, COOLDOWN_MS);
 }
 
 /** Get or create guild state */
@@ -71,11 +72,8 @@ export function getState(guildId: string): GuildState {
       inactivityTimer: null,
       inactivityUntil: null,
       disconnecting: false,
-      onPlayerEnd: null,
-      onPlayerClosed: null,
-      onPlayerException: null,
-      onPlayerStuck: null,
-      playerListenerTarget: null,
+      listenedPlayer: null,
+      unlistenPlayer: null,
       trackSeq: 0,
       buttonCooldowns: new Map(),
       idleUiTimer: null,

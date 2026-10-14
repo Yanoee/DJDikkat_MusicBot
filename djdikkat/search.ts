@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Search engine
  * Link cleanup + "what did the user mean" ranking for /play
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { LoadType } from 'shoukaku';
@@ -21,11 +21,40 @@ export function fold(text: string): string {
 }
 
 // Apostrophes join rather than split: "İstanbul'da" → "istanbulda", "Don't" → "dont".
-export const tokenize = (text: string): string[] =>
+const tokenize = (text: string): string[] =>
   fold(text).replace(/['’‘`´]/g, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
 // Long words say more about a song than "in", "the", "be".
 const weight = (word: string) => Math.min(word.length, 6);
+
+/** Typing slips between two words (insert, delete, change, swap neighbours), capped at 2. */
+function slips(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 1) return 2;
+  let before: number[] = [];
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j]! + 1, row[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) row[j] = Math.min(row[j]!, before[j - 2]! + 1);
+    }
+    before = prev;
+    prev = row;
+  }
+  return Math.min(prev[b.length]!, 2);
+}
+
+// A long word one slip away still counts ("bohemain rapsody" → Bohemian
+// Rhapsody), but less than an exact match, so a title that copies the typo
+// doesn't beat the real song.
+const TYPO_CREDIT = 0.8;
+
+function matchCredit(word: string, words: Set<string>): number {
+  if (words.has(word)) return 1;
+  if (word.length < 5) return 0;
+  for (const w of words) if (w.length >= 5 && slips(word, w) <= 1) return TYPO_CREDIT;
+  return 0;
+}
 
 // ── Links ─────────────────────────────────────────────────────
 
@@ -40,6 +69,9 @@ const TRACKING_PARAMS = ['si', 'feature', 'pp', 'ab_channel', 'utm_source', 'utm
 export function normalizeLink(input: string): string | null {
   let text = input.trim();
   if (/\s/.test(text)) return null;
+  // Spotify app's "Copy URI": spotify:track:ID → its open.spotify.com link
+  const uri = text.match(/^spotify:(track|album|playlist|artist):(\w+)$/i);
+  if (uri) return `https://open.spotify.com/${uri[1]!.toLowerCase()}/${uri[2]}`;
   if (!/^https?:\/\//i.test(text)) {
     if (!/^[\w-]+(\.[\w-]+)+\/\S*$/.test(text)) return null; // host.tld/path
     text = `https://${text}`;
@@ -92,11 +124,15 @@ export function rankCandidates(query: string, candidates: Candidate[], expectedM
   const scored = candidates.map(({ track, rank, source }): Scored => {
     const { title, author, length, isStream } = track.info;
     const titleWords = new Set(tokenize(title));
-    const words = new Set([...titleWords, ...tokenize(author)]);
-    const covered = [...queryWords].reduce((sum, w) => sum + (words.has(w) ? weight(w) : 0), 0);
+    const authorWords = tokenize(author);
+    const words = new Set([...titleWords, ...authorWords]);
+    const covered = [...queryWords].reduce((sum, w) => sum + weight(w) * matchCredit(w, words), 0);
     const coverage = total ? covered / total : 1;
 
     let score = coverage * 12 + 6 / (1 + rank * 0.5) + (source === 'ytm' ? 1 : 0);
+    // The query is exactly an artist's name ("duman") → that artist's songs,
+    // not someone else's song titled after them.
+    if (authorWords.length === queryWords.size && authorWords.every(w => queryWords.has(w))) score += 3;
     for (const [variant, penalty] of VARIANTS) {
       if (variant.some(w => titleWords.has(w)) && !asked(variant)) score -= penalty;
     }
@@ -139,7 +175,7 @@ function merge(...lists: Candidate[][]): Candidate[] {
 }
 
 /** Best track for a text query: YouTube Music, then YouTube if unsure, then SoundCloud if still nothing fits. */
-export async function searchText(resolve: Resolver, query: string, expectedMs?: number): Promise<Scored | null> {
+async function searchText(resolve: Resolver, query: string, expectedMs?: number): Promise<Scored | null> {
   let pool = await candidates(resolve, 'ytmsearch', query, 'ytm');
   let best = rankCandidates(query, pool, expectedMs)[0];
   if (!best || best.coverage < CONFIDENT) {
@@ -150,11 +186,12 @@ export async function searchText(resolve: Resolver, query: string, expectedMs?: 
     pool = merge(pool, await candidates(resolve, 'scsearch', query, 'sc'));
     best = rankCandidates(query, pool, expectedMs)[0];
   }
-  if (best) {
-    const { title, author } = best.track.info;
-    console.debug(`[SEARCH] "${query}" → "${title}" by ${author} (${best.source}, score=${best.score.toFixed(1)}, coverage=${best.coverage.toFixed(2)})`);
-  }
-  return best && best.coverage > 0 ? best : null;
+  const hit = best && best.coverage > 0 ? best : null;
+  // Normal level on purpose: updater/watch-snapshot.sh counts matches vs "no match".
+  console.log(hit
+    ? `[SEARCH] "${query}" → "${hit.track.info.title}" by ${hit.track.info.author} (${hit.source}, score=${hit.score.toFixed(1)}, coverage=${hit.coverage.toFixed(2)})`
+    : `[SEARCH] "${query}" → no match`);
+  return hit;
 }
 
 /** Top YouTube Music matches, ranked — for /play suggestions. */
@@ -174,6 +211,7 @@ async function searchSpotify(resolve: Resolver, url: string, room: number, guild
   try {
     specs = await resolveSpotifyTracks(url, room);
   } catch (err) {
+    if (err instanceof UserError) throw err;
     const appErr = logError(err, { guildId });
     throw new UserError(`❌ Spotify error (ref: ${appErr.ref}). Try again in a moment, or paste a direct YouTube link instead.`);
   }

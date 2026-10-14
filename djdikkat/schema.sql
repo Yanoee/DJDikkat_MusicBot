@@ -1,5 +1,5 @@
 -- DJ DIKKAT - MariaDB schema (bot data)
--- Applied automatically on startup by db.js; every statement is idempotent.
+-- Applied automatically on startup by db.ts; every statement is idempotent.
 -- All DATETIME columns are UTC.
 
 -- One row per guild the bot has ever seen: directory info, settings, and the

@@ -3,7 +3,7 @@
  * Logger
  * Timestamped console output — patches global console
  * Writes to stdout and a zip-archived, per-run rotating log file
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { inspect } from 'node:util';
@@ -145,12 +145,18 @@ export function clearLogFile(): boolean {
 }
 
 // ── Heartbeat ─────────────────────────────────────────────────
+export function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds / 3600) % 24);
+  const m = Math.floor((seconds / 60) % 60);
+  const s = Math.floor(seconds % 60);
+  return [d && `${d}d`, h && `${h}h`, m && `${m}m`, `${s}s`].filter(Boolean).join(' ');
+}
+
 export function startHeartbeat(client: Client, getActiveVoiceCount: () => number): void {
   setInterval(() => {
     const mem = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    const s   = Math.floor(process.uptime());
-    const up  = s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}m`;
-    const line = `${ts()} 💓 ${getActiveVoiceCount()} playing  •  ${client.guilds.cache.size} guilds  •  ${mem}MB  •  up ${up}`;
+    const line = `${ts()} 💓 ${getActiveVoiceCount()} playing  •  ${client.guilds.cache.size} guilds  •  ${mem}MB  •  up ${formatUptime(process.uptime())}`;
     _log(line);
     writeFile(line);
   }, 10 * 60 * 1000);

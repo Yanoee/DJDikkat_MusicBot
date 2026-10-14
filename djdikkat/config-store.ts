@@ -4,11 +4,15 @@
  * Admin-set runtime settings persisted in the bot_config table
  * so they survive restarts. Values are JSON; the cache keeps
  * reads synchronous.
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import * as db from './db.ts';
-import type { Maintenance } from './runtime-flags.ts';
+
+export interface Maintenance {
+  enabled: boolean;
+  message: string;
+}
 
 export interface PresenceConfig {
   status: string;
@@ -52,4 +56,25 @@ export function setConfig<K extends Key>(name: K, value: ConfigMap[K] | null): v
     'INSERT INTO bot_config (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
     [name, JSON.stringify(value)]
   ), `save config ${name}`);
+}
+
+// ── Maintenance switch (admin panel) ──────────────────────
+
+const DEFAULT_MAINTENANCE: Maintenance = {
+  enabled: false,
+  message: '🛠️ DJ DIKKAT is being updated — please try again in a few minutes!'
+};
+
+export function getMaintenance(): Maintenance {
+  return { ...DEFAULT_MAINTENANCE, ...getConfig('maintenance') };
+}
+
+/** Sets and persists the switch; a blank message keeps the current one. */
+export function setMaintenance(enabled: unknown, message?: unknown): Maintenance {
+  const next: Maintenance = {
+    enabled: !!enabled,
+    message: typeof message === 'string' && message.trim() ? message.trim().slice(0, 300) : getMaintenance().message
+  };
+  setConfig('maintenance', next);
+  return next;
 }

@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Stats engine
  * Per-guild play counters and rollups, stored in MariaDB
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  *
  * Table:
@@ -156,16 +156,9 @@ export function getStatsMeta(): { tracksSinceBoot: number; lastWriteTime: Date |
   return { tracksSinceBoot, lastWriteTime };
 }
 
-// ── Ranking helpers (used by stats_ui.ts) ─────────────────
-
-export function topFromMap(map: Record<string, number>, limit = 3) {
-  return Object.entries(map).map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count).slice(0, limit);
-}
-
-export function topFromUrlMap(map: Bucket['songsByUrl'], limit = 3) {
-  return Object.entries(map).map(([key, v]) => ({ key, count: v.count, title: v.title })).sort((a, b) => b.count - a.count).slice(0, limit);
-}
-
-export function topUsers(map: Bucket['users'], limit = 3) {
-  return Object.entries(map).map(([id, v]) => ({ id, count: v.count, tag: v.tag })).sort((a, b) => b.count - a.count).slice(0, limit);
+/** Highest `limit` entries of a counter map (used by stats_ui.ts). */
+export function top<V extends number | Counted>(map: Record<string, V>, limit = 3) {
+  return Object.entries(map)
+    .map(([key, value]) => ({ key, value, count: typeof value === 'number' ? value : value.count }))
+    .sort((a, b) => b.count - a.count).slice(0, limit);
 }

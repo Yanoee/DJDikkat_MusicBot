@@ -2,10 +2,10 @@
  * DJ DIKKAT - Music Bot
  * Spotify resolver
  * Spotify URL -> title, artist and duration for the search engine
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
-import { AppError, ErrorCodes, errMsg } from './errors.ts';
+import { AppError, UserError, errMsg } from './errors.ts';
 
 interface SpotifyTrack { name?: string; artists?: { name?: string }[]; duration_ms?: number }
 /** What the search engine needs to find a Spotify track on YouTube. */
@@ -22,7 +22,7 @@ export function isSpotifyUrl(input: string): boolean {
   return /^https?:\/\/((open|play)\.spotify\.com|spotify\.link)\//i.test(input);
 }
 
-function parseSpotifyUrl(url: string): { type: 'track' | 'album' | 'playlist'; id: string } | null {
+function parseSpotifyUrl(url: string): { type: 'track' | 'album' | 'playlist' | 'artist'; id: string } | null {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
     let i = 0;
@@ -31,7 +31,7 @@ function parseSpotifyUrl(url: string): { type: 'track' | 'album' | 'playlist'; i
     if (parts[i] === 'user' && parts[i + 2] === 'playlist') i += 2; // /user/{u}/playlist/{id}
     const type = parts[i];
     const id = parts[i + 1];
-    if (!id || (type !== 'track' && type !== 'album' && type !== 'playlist')) return null;
+    if (!id || (type !== 'track' && type !== 'album' && type !== 'playlist' && type !== 'artist')) return null;
     return { type, id };
   } catch {
     return null;
@@ -42,7 +42,7 @@ async function getToken(): Promise<string> {
   if (token && token.expiresAt > Date.now() + 30_000) return token.value;
   const { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } = process.env;
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-    throw new AppError(ErrorCodes.SPOTIFY_ERROR, 'Spotify credentials are not configured');
+    throw new AppError('SPOTIFY_ERROR', 'Spotify credentials are not configured');
   }
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
@@ -54,7 +54,7 @@ async function getToken(): Promise<string> {
     signal: AbortSignal.timeout(TIMEOUT)
   });
   if (!res.ok) {
-    throw new AppError(ErrorCodes.SPOTIFY_ERROR, `Spotify token request failed (HTTP ${res.status}) — check client id/secret`, { status: res.status });
+    throw new AppError('SPOTIFY_ERROR', `Spotify token request failed (HTTP ${res.status}) — check client id/secret`, { status: res.status });
   }
   const data = await res.json() as { access_token: string; expires_in: number };
   token = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
@@ -67,7 +67,7 @@ async function spotifyGet<T>(path: string): Promise<T> {
     signal: AbortSignal.timeout(TIMEOUT)
   });
   if (!res.ok) {
-    throw new AppError(ErrorCodes.SPOTIFY_ERROR, `Spotify API request failed (HTTP ${res.status})`, { status: res.status, path });
+    throw new AppError('SPOTIFY_ERROR', `Spotify API request failed (HTTP ${res.status})`, { status: res.status, path });
   }
   return res.json() as Promise<T>;
 }
@@ -115,6 +115,17 @@ export async function resolveSpotifyTracks(url: string, limit = 3): Promise<Spot
     const album = await spotifyGet<{ tracks?: Page<SpotifyTrack> }>(`/albums/${parsed.id}`);
     return collect(album.tracks, toSpec, limit);
   }
-  const first = await spotifyGet<Page<{ track?: SpotifyTrack }>>(`/playlists/${parsed.id}/tracks?limit=100`);
+  if (parsed.type === 'artist') {
+    const { tracks = [] } = await spotifyGet<{ tracks?: SpotifyTrack[] }>(`/artists/${parsed.id}/top-tracks?market=TR`);
+    return tracks.map(toSpec).filter(s => s !== null).slice(0, limit);
+  }
+  const first = await spotifyGet<Page<{ track?: SpotifyTrack }>>(`/playlists/${parsed.id}/tracks?limit=100`).catch(err => {
+    // Spotify hides its own editorial playlists (Today's Top Hits, …) from
+    // third-party apps since late 2024 — a 404 there isn't worth retrying.
+    if (err instanceof AppError && err.context.status === 404) {
+      throw new UserError('❌ Spotify won\'t share that playlist — it\'s private, deleted, or made by Spotify itself (those are off-limits to bots). Try a public playlist made by a user, or a YouTube link.');
+    }
+    throw err;
+  });
   return collect(first, item => toSpec(item.track), limit);
 }

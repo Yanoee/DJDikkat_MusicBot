@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Bot entrypoint
  * Client bootstrap and event wiring
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 // ESM evaluates imports in order: .env first, then the logger's console patch,
@@ -14,7 +14,7 @@ import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
 import { Shoukaku, Connectors } from 'shoukaku';
 import pkg from '../package.json' with { type: 'json' };
 
-import { handleInteraction, deployCommands, setButtonCooldownMs } from './commands.ts';
+import { handleInteraction, deployCommands, setButtonCooldownMs, STATS_AUTO_DELETE_MS } from './commands.ts';
 import { peekState, getActiveVoiceCount, getActiveGuildIds, setCommandCooldownMs } from './state.ts';
 import { disconnectGuild, handlePlayerFailure } from './player.ts';
 import { deleteMessage } from './ui.ts';
@@ -25,7 +25,6 @@ import * as db from './db.ts';
 import * as stats from './stats.ts';
 import * as dmStore from './dm-store.ts';
 import * as configStore from './config-store.ts';
-import { setMaintenance } from './runtime-flags.ts';
 import { errMsg } from './errors.ts';
 import type {} from './types.ts'; // Client.shoukaku augmentation
 
@@ -35,8 +34,6 @@ if (!DISCORD_TOKEN || !NODELINK_HOST || !NODELINK_PORT || !NODELINK_PASSWORD) {
   console.error(`Missing required env vars: ${missing.join(', ')}`);
   process.exit(1);
 }
-
-const STATS_AUTO_DELETE_MS = 3 * 60 * 1000;
 
 // ---------------- DISCORD CLIENT ----------------
 
@@ -199,8 +196,6 @@ async function loadData(): Promise<void> {
   await db.ensureSchema();
   const [mem, st, dms, confs] = await Promise.all([memory.loadAll(), stats.loadAll(), dmStore.loadAll(), configStore.loadAll()]);
 
-  const maintenance = configStore.getConfig('maintenance');
-  if (maintenance) setMaintenance(maintenance.enabled, maintenance.message);
   const cooldowns = configStore.getConfig('cooldowns');
   if (cooldowns) {
     setCommandCooldownMs(cooldowns.commandCooldownMs);

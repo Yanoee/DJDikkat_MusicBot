@@ -1,7 +1,7 @@
 /************************************************************
  * DJ DIKKAT - Internal HTTP server
  * Localhost-only API so admin-api can trigger bot actions
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import http from 'node:http';
@@ -14,10 +14,9 @@ import { getGuildMemory, getGuildMessagesRaw, resetGuildMemory, resetGuildHistor
 import { getGuildStatsRaw } from './stats.ts';
 import { peekState, getActiveVoiceCount, getCommandCooldownMs, setCommandCooldownMs } from './state.ts';
 import { clearLogFile, getLogLevel, setLogLevel } from './logger.ts';
-import { getMaintenance, setMaintenance } from './runtime-flags.ts';
 import { deployCommands, getButtonCooldownMs, setButtonCooldownMs } from './commands.ts';
 import { disconnectGuild, getRecoveryStats } from './player.ts';
-import { getConfig, setConfig } from './config-store.ts';
+import { getConfig, setConfig, getMaintenance, setMaintenance } from './config-store.ts';
 import type { PresenceConfig } from './config-store.ts';
 import { errMsg } from './errors.ts';
 
@@ -161,9 +160,7 @@ function buildRoutes(client: Client<true>) {
         if (saved) applyPresence(client, toPresenceData(saved));
         setConfig('savedPresence', null);
       }
-      const result = setMaintenance(enabled, message);
-      setConfig('maintenance', result);
-      return [200, result];
+      return [200, setMaintenance(enabled, message)];
     },
 
     'POST /deploy-commands': async () => {

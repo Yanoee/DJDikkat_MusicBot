@@ -2,11 +2,11 @@
  * DJ DIKKAT - Music Bot
  * Stats UI
  * Per-guild stats embed builder
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { getStatsSnapshot, topFromMap, topFromUrlMap, topUsers } from './stats.ts';
+import { getStatsSnapshot, top } from './stats.ts';
 
 const TITLE_LIMIT = 60;
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -25,12 +25,12 @@ function buildStatsEmbed(guildId: string): EmbedBuilder {
     return url ? `[${truncate(title)}](${url})` : truncate(title);
   };
   const top1 = (map: Record<string, number>) => {
-    const [first] = topFromMap(map, 1);
+    const [first] = top(map, 1);
     return first ? `⭐ ${link(first.key)} — ${first.count}` : '—';
   };
   const list = <T>(items: T[], line: (x: T, i: number) => string) => items.length ? items.map(line).join('\n') : '—';
 
-  const topUrls = topFromUrlMap(snap.totals.songsByUrl, 3);
+  const topUrls = top(snap.totals.songsByUrl);
   const titles = Object.keys(snap.totals.songsByTitle);
   const honorable = titles[Math.floor(Math.random() * titles.length)];
 
@@ -41,10 +41,10 @@ function buildStatsEmbed(guildId: string): EmbedBuilder {
       {
         name: '🎵 Most played song',
         value: topUrls.length
-          ? list(topUrls, (x, i) => `${medal(i)} [${truncate(x.title)}](${x.key}) — ${x.count}`)
-          : list(topFromMap(snap.totals.songsByTitle, 3), (x, i) => `${medal(i)} ${link(x.key)} — ${x.count}`)
+          ? list(topUrls, (x, i) => `${medal(i)} [${truncate(x.value.title)}](${x.key}) — ${x.count}`)
+          : list(top(snap.totals.songsByTitle), (x, i) => `${medal(i)} ${link(x.key)} — ${x.count}`)
       },
-      { name: '👤 Top users', value: list(topUsers(snap.totals.users, 3), (x, i) => `${medal(i)} <@${x.id}> — ${x.count}`) },
+      { name: '👤 Top users', value: list(top(snap.totals.users), (x, i) => `${medal(i)} <@${x.key}> — ${x.count}`) },
       { name: '📅 Daily top (today)', value: top1(snap.today.songsByTitle) },
       { name: '📈 Weekly top (7d)', value: top1(snap.weekly.songsByTitle) },
       { name: '🏅 Honorable mention', value: honorable ? link(honorable) : '—' }

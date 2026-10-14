@@ -2,7 +2,7 @@
  * DJ DIKKAT - Music Bot
  * Command router
  * Slash commands and button interactions
- * Build 5.2.0
+ * Build 5.3.0
  * Author: Yanoee
  ************************************************************/
 import {
@@ -14,7 +14,7 @@ import type {
   RepliableInteraction
 } from 'discord.js';
 import type { Track } from 'shoukaku';
-import { getState, peekState, checkCooldown } from './state.ts';
+import { getState, peekState, checkCooldown, clampCooldownMs } from './state.ts';
 import type { GuildState } from './state.ts';
 import { upsertController, truncateQueueTitle, deleteMessage, formatMs } from './ui.ts';
 import {
@@ -30,7 +30,7 @@ import {
 import { search, suggest, tracksOf, fold, normalizeLink } from './search.ts';
 import { sendAnnouncement } from './announcement.ts';
 import { trackDm } from './dm-store.ts';
-import { getMaintenance } from './runtime-flags.ts';
+import { getMaintenance } from './config-store.ts';
 import { UserError, logError, errMsg } from './errors.ts';
 import type { QueueTrack } from './types.ts';
 
@@ -38,7 +38,7 @@ let BUTTON_COOLDOWN_MS = 5000;
 const BUTTON_COOLDOWN_PRUNE_LIMIT = 500;
 const PAGE_SIZE = 10;
 const MAX_QUEUE = 25;
-const STATS_AUTO_DELETE_MS = 3 * 60 * 1000;
+export const STATS_AUTO_DELETE_MS = 3 * 60 * 1000;
 
 const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral } as const);
 const NOTHING_PLAYING = ephemeral('🔇 Nothing is playing');
@@ -48,8 +48,7 @@ const queueFull = () => `❌ Queue is full (${MAX_QUEUE} tracks max). Skip or cl
 
 export function getButtonCooldownMs(): number { return BUTTON_COOLDOWN_MS; }
 export function setButtonCooldownMs(ms: unknown): number {
-  if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) BUTTON_COOLDOWN_MS = Math.min(ms, 60000);
-  return BUTTON_COOLDOWN_MS;
+  return BUTTON_COOLDOWN_MS = clampCooldownMs(ms, BUTTON_COOLDOWN_MS);
 }
 
 /** Seconds left on this user's button cooldown, or 0 (and starts a new window). */
@@ -492,7 +491,8 @@ export async function handleInteraction(interaction: Interaction): Promise<void>
     const appErr = logError(err, { guildId: interaction.guildId, command: label });
     await replyEphemeral(interaction, `❌ Something went wrong (ref: ${appErr.ref}). Try again in a moment.`).catch(() => {});
   } finally {
-    console.debug(`[CMD] ← ${label} ${outcome} (${Date.now() - t0}ms)`);
+    // Normal level on purpose: updater/watch-snapshot.sh reads outcomes + latency from it.
+    console.log(`[CMD] ← ${label} ${outcome} (${Date.now() - t0}ms)`);
     if (announce) {
       sendAnnouncement(interaction.guild, interaction.channelId).catch(err =>
         console.error(`Announcement failed in guild ${interaction.guildId}:`, err));

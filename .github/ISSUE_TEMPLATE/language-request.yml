@@ -1,0 +1,38 @@
+name: Language request
+description: Ask for DJ DIKKAT in a new language, or offer to translate it.
+title: "Language request: "
+labels: ["language-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! Please check the [open requests](https://github.com/Yanoee/DJDikkat_MusicBot/issues?q=is%3Aopen+label%3Alanguage-request) first. If your language is already there, give it a 👍 instead. The votes show on [djdikkat.com/translate](https://www.djdikkat.com/translate).
+        Want to translate? [TRANSLATING.md](https://github.com/Yanoee/DJDikkat_MusicBot/blob/main/TRANSLATING.md) explains everything.
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      description: Its English name and code. Please put the same in the title, after "Language request:".
+      placeholder: German (de)
+    validations:
+      required: true
+  - type: input
+    id: native
+    attributes:
+      label: Its name in that language
+      placeholder: Deutsch
+  - type: dropdown
+    id: helping
+    attributes:
+      label: Will you translate it?
+      options:
+        - Yes, I'll translate it
+        - I can help or review
+        - No, I'm only asking for it
+    validations:
+      required: true
+  - type: input
+    id: discord
+    attributes:
+      label: Discord username (optional)
+      description: In case we need to reach you about the translation.

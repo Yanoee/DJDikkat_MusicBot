@@ -90,12 +90,26 @@ Only people with **Manage Server** can change settings, and the bot checks that 
 
 <img src=".github/readme/05-stack.png" alt="05 Under the hood" width="100%">
 
+This repository is the bot itself, in [`djdikkat/`](djdikkat):
+
 - **Node.js 26** runs the TypeScript directly (type stripping, no build step). Strict types, no framework.
 - **discord.js 14** with Discord's newer message layout for the player and setup cards.
 - **NodeLink** streams the audio, driven through **Shoukaku 4**. Spotify links resolve through the Spotify Web API.
-- **MariaDB** keeps history, stats and server settings, with nightly backups.
+- **MariaDB** keeps history, stats and server settings.
 - **@napi-rs/canvas** draws the player, welcome and launch cards in the website's style.
-- **djdikkat.com** is PHP 8.2 behind nginx and Cloudflare, with a small ops daemon for the owner's admin panel.
+- **English and Turkish** texts live in [`djdikkat/src/i18n`](djdikkat/src/i18n); translators work from [`translations/`](translations).
+
+| Folder | What's in it |
+|---|---|
+| `src/commands` | The slash commands |
+| `src/components`, `src/events` | Buttons, menus and Discord events |
+| `src/music` | Player, queue, search and Spotify |
+| `src/services` | Database, settings, permissions, welcome cards, AutoMod features, launch |
+| `src/ui` | The cards: player, queue, stats, health, setup, welcome |
+| `src/internal` | The bot's private API for the website (localhost only, behind secrets) |
+| `tests` | `npm test`: search, texts and card rendering |
+
+The website and web panel run on [djdikkat.com](https://www.djdikkat.com) and aren't part of this repository. The bot isn't packaged for self-hosting either: just [add it to your server](https://www.djdikkat.com/invite), it's free.
 
 <br>
 

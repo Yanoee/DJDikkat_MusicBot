@@ -1,140 +1,124 @@
-![Logo](https://images2.imgbox.com/6c/31/E8jm3ZKg_o.png)
+<p align="center">
+  <a href="https://www.djdikkat.com"><img src=".github/readme/hero.png" alt="DJ DIKKAT, free music bot for Discord" width="100%"></a>
+</p>
 
-[![License](https://img.shields.io/badge/License-MIT-yellow)](https://github.com/Yanoee/DJDikkat_MusicBot/blob/main/LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A524-green?logo=node.js)](https://nodejs.org/)
-[![Discord.js](https://img.shields.io/badge/discord.js-v14-blue?logo=discord)](https://discord.js.org/)
-[![NodeLink](https://img.shields.io/badge/NodeLink-Audio-purple)](https://github.com/PerformanC/NodeLink)
-[![Shoukaku](https://img.shields.io/badge/Shoukaku-v4-orange)](https://github.com/Deivu/Shoukaku)
-[![Website](https://img.shields.io/badge/Website-djdikkat.com-blue)](https://www.djdikkat.com)
-[![Free Forever](https://img.shields.io/badge/Free-Forever-brightgreen)](https://www.djdikkat.com)
+<p align="center">
+  <a href="https://www.djdikkat.com/invite"><img src="https://img.shields.io/badge/Add_to_Discord-b5651d?style=for-the-badge&logo=discord&logoColor=white" alt="Add to Discord"></a>
+  <a href="https://www.djdikkat.com"><img src="https://img.shields.io/badge/djdikkat.com-3b82c4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
+  <a href="https://www.djdikkat.com/vote"><img src="https://img.shields.io/badge/Vote_on_Top.gg-1c1a17?style=for-the-badge" alt="Vote on Top.gg"></a>
+  <a href="https://www.djdikkat.com/patreon"><img src="https://img.shields.io/badge/Patreon-1c1a17?style=for-the-badge&logo=patreon&logoColor=white" alt="Patreon"></a>
+  <a href="https://www.djdikkat.com/translate"><img src="https://img.shields.io/badge/Translate-1c1a17?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate"></a>
+</p>
 
-# 🎧 DJ DIKKAT - Free Discord Music Bot
+<p align="center">
+  <img src="https://img.shields.io/badge/Node.js-26-3b82c4?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js 26">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3b82c4?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/discord.js-14-3b82c4?style=flat-square&logo=discord&logoColor=white" alt="discord.js 14">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-5e5a54?style=flat-square" alt="MIT license"></a>
+</p>
 
-A free, open source Discord music bot with Spotify and YouTube support.  
-No ads. No premium. No BS. Built by one person, free for everyone.
+**DJ DIKKAT** is a free Discord music bot, made in memory of **DJ Dikkat (Mehmet Aykın)**, a rapper from Şanlıurfa. It plays YouTube, Spotify and SoundCloud, and comes with its own web panel, welcome cards and moderation tools.
 
----
+No premium, no ads, no vote locks. Built by one person, free for everyone.
 
-[🌐 Website](https://www.djdikkat.com) • [📨 Invite Bot](https://discord.com/oauth2/authorize?client_id=1457783766771564688&permissions=36793408&integration_type=0&scope=bot+applications.commands) • [⭐ Vote on Top.gg](https://top.gg/bot/1457783766771564688) • [❤️ Support on Patreon](https://www.patreon.com/Yanoee) • [💻 Report a Bug](https://github.com/Yanoee/DJDikkat_MusicBot/issues)
+<br>
 
----
+<img src=".github/readme/01-music.png" alt="01 Music" width="100%">
 
-## 🔧 Features
+<p align="center"><img src=".github/readme/player-card.png" alt="The player card in Discord: artwork, title, progress bar and a row of icon buttons" width="90%"></p>
 
-- **Multi-source playback** - Search by name, paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. YouTube Music is tried first, YouTube second, SoundCloud as final fallback.
-- **Smart search** - `/play` suggests the top matches while you type; pick one to play exactly that track. Plain-text searches trust YouTube Music's ranking, match whole words (Turkish letters optional: `baris manco donence` finds *Dönence*), forgive a typo in longer words (`bohemain rapsody` finds *Bohemian Rhapsody*), prefer the artist when you type just an artist's name, and skip covers, remixes, live and nightcore versions unless you ask for them.
-- **Clean links** - A video link opened from a Mix or playlist plays just that video. Mobile and `https://`-less links work, and a broken or unsupported link tells you why instead of playing something random.
-- **Spotify support** - Resolves Spotify tracks, albums, playlists, and artists (their top tracks) to YouTube via the Spotify Web API. `spotify:track:…` URIs from the desktop app work too. Playlists made by Spotify itself (e.g. *Today's Top Hits*) are closed to bots by Spotify, and the bot says so. No Spotify premium account needed on your end.
-- **Interactive player card** - A persistent embed in your text channel with live controls. No need to type commands - everything is a button click.
-- **3-state loop** - Cycles Off ~ Track ~ Queue ~ Off. Toggle any time with the loop button on the player card.
-- **Queue shuffle** - Fisher-Yates shuffle applied instantly, reflected live in the card.
-- **Play history** - Every play is kept in the database with timestamp and requester info. `/history` shows the newest 200, paginated and sent to your DM.
-- **Stats tracking** - Per-guild stats: most-played songs, top users, daily and weekly breakdowns. All-time totals are kept forever; daily breakdowns older than 30 days are pruned automatically.
-- **Auto-disconnect** - Bot leaves after 5 minutes of idle. No manual cleanup needed.
-- **Idle player card** - When the queue empties, the card stays with a live countdown and a "Play Again" button for the last track.
-- **Clean chat** - Player card is deleted and reposted fresh with each new song. Stale cards from previous sessions are cleaned up on startup.
-- **Auto-leave on empty voice** - Bot disconnects immediately when the last human leaves the voice channel.
-- **Voice channel status** - Updates the voice channel status to show the currently playing track.
-- **Weekly announcements** - Sends an informational embed to each guild every 7 days (dismissible by admins).
-- **Owner welcome DM** - When added to a new server, the owner gets a DM with a quick-start guide and required permissions list.
-- **MariaDB storage** - History, stats, settings, and admin state live in MariaDB (schema in `djdikkat/schema.sql`, created automatically on startup). Every row is keyed by guild, so resetting one guild never touches another's data. Nightly gzipped backups via `updater/backup-db.sh`.
+| | |
+|:---:|---|
+| 🎵 | **Every source.** Search by name with live suggestions, or paste a YouTube, Spotify or SoundCloud link: tracks, albums, playlists and Spotify artists. |
+| 🎛️ | **One player card.** Artwork, a moving progress bar and one row of buttons. It reposts itself for every new song, so it never gets buried in chat. |
+| 🔁 | **Loop and shuffle.** Loop one track or the whole queue, shuffle any time. |
+| 📜 | **Queue of 25.** See what's next, reorder it, or jump straight to any song from the web panel. |
+| 🔍 | **Smart search.** Finds the original, not the cover, remix or nightcore version, forgives typos and works without Turkish letters (`baris manco` finds *Barış Manço*). |
+| 📊 | **History and stats.** Top tracks, top listeners and your server's busiest hours. |
+| 🔌 | **Tidy.** Leaves when the channel empties or goes quiet for 5 minutes. |
 
----
+<br>
 
-## 📟 Commands
+<img src=".github/readme/02-panel.png" alt="02 Web panel" width="100%">
 
-| Command | Description |
+Type `/panel` in your server and you get a private login link. Everything below runs in your browser at [djdikkat.com](https://www.djdikkat.com).
+
+| | |
+|:---:|---|
+| ▶️ | **Player.** Search, queue, skip and seek while you listen in Discord. Drag songs to reorder, click one to play it now. |
+| 💾 | **Playlists and history.** Save songs and play them again with one click. |
+| 📈 | **Stats.** Plays per day and per hour, top tracks and top listeners with their avatars. |
+| 🛡️ | **Permissions.** DJ roles, music channels, and who can use each command where. |
+| 🎨 | **Settings.** The bot's language and your server's own player card colour. |
+
+Only people with **Manage Server** can change settings, and the bot checks that again on every action.
+
+<br>
+
+<img src=".github/readme/03-welcome.png" alt="03 Welcome and moderation" width="100%">
+
+<p align="center"><img src=".github/readme/welcome-card.png" alt="A welcome card for a new member" width="80%"></p>
+
+| | |
+|:---:|---|
+| 🖼️ | **Welcome cards.** A picture card, a text message or both, posted in a channel and/or sent as a DM. Your colour, your background. |
+| 🚪 | **Leave messages** when someone leaves. |
+| 🏷️ | **Auto-role** for new members, after membership screening. |
+| 🔗 | **Link blocker and word filter**, built on Discord's own AutoMod, so they keep working even if the bot is offline. |
+
+<br>
+
+<img src=".github/readme/04-commands.png" alt="04 Commands" width="100%">
+
+| Command | What it does |
 |---|---|
-| `/play <query>` | Search by name (with live suggestions) or paste a YouTube, Spotify, or SoundCloud URL. Tracks, albums, and playlists all work. Queue cap: 25 tracks. |
-| `/pause` | Pause or resume the current track. |
-| `/skip` | Skip the current track immediately. |
-| `/stop` | Stop playback and clear the queue. Bot stays in voice. |
-| `/queue` | Show the current queue with requester info. Paginated, 10 tracks per page. You need to be in the bot's voice channel. |
-| `/history` | View the newest 200 plays for this server. Paginated, sent via DM. |
-| `/stats` | Show music stats - top songs, top users, today's top, and weekly top. Auto-deletes after 3 minutes if nothing is playing. |
-| `/disconnect` | Stop everything and disconnect the bot from voice. |
-| `/health` | *(Admin only)* Full health report sent via DM - Discord ping, RAM, CPU, NodeLink stats, uptime, and last update info. |
+| `/play` | Play a song: a name (with live suggestions) or a YouTube / Spotify / SoundCloud link |
+| `/pause` | Pause or resume |
+| `/skip` | Skip the current track |
+| `/stop` | Stop the music and clear the queue. The bot stays in voice |
+| `/disconnect` | Make the bot leave the voice channel |
+| `/queue` | Show the queue, 10 songs per page |
+| `/history` | The newest 200 plays of your server, sent to your DMs |
+| `/stats` | Music stats for your server |
+| `/language` | English or Türkçe for this server |
+| `/panel` | A one-time link to your server's web panel |
+| `/health` | The bot's health report, sent to your DMs |
 
-> Commands have a 5-second per-server cooldown (adjustable in the admin panel).
+**The player card's buttons:** pause / resume, skip, stop, loop (off, one track, the whole queue) and the queue, which opens your private queue view with shuffle, clear and a link to the web panel.
 
-### Player Card Buttons
+<br>
 
-When music is playing, a rich embed appears in your text channel:
+<img src=".github/readme/05-stack.png" alt="05 Under the hood" width="100%">
 
-**Row 1**
+- **Node.js 26** runs the TypeScript directly (type stripping, no build step). Strict types, no framework.
+- **discord.js 14** with Discord's newer message layout for the player and setup cards.
+- **NodeLink** streams the audio, driven through **Shoukaku 4**. Spotify links resolve through the Spotify Web API.
+- **MariaDB** keeps history, stats and server settings, with nightly backups.
+- **@napi-rs/canvas** draws the player, welcome and launch cards in the website's style.
+- **djdikkat.com** is PHP 8.2 behind nginx and Cloudflare, with a small ops daemon for the owner's admin panel.
 
-| Button | Action |
-|---|---|
-| ⏸ / ▶️ | Pause / Resume |
-| ⏭️ | Skip to next track |
-| ⏹️ | Stop playback |
+<br>
 
-**Row 2**
+<img src=".github/readme/06-translate.png" alt="06 Translate" width="100%">
 
-| Button | Action |
-|---|---|
-| 🔁 / 🔂 | Cycle loop mode (Off ~ Track ~ Queue ~ Off) |
-| 🔀 | Shuffle the queue |
-| 📜 | View the queue |
-| 🧹 | Clear the queue |
+DJ DIKKAT speaks English and Turkish. Want it in your language? No coding needed: you translate two files, an automatic check catches anything missing, and you're credited on [djdikkat.com/translate](https://www.djdikkat.com/translate).
 
-**When idle (queue empty)**
+👉 **[Request a language](https://github.com/Yanoee/DJDikkat_MusicBot/issues/new?template=language-request.yml)** · **[Read the guide](TRANSLATING.md)**
 
-| Button | Action |
-|---|---|
-| ⏮️ Play Again | Re-queue the last played track |
-| 🔌 | Disconnect the bot |
+<br>
 
-> Buttons have a 5-second per-user cooldown to prevent spam.
+<img src=".github/readme/07-support.png" alt="07 Free forever" width="100%">
 
----
+DJ DIKKAT is free and stays free. Every server bill comes out of one hobby developer's pocket. If the bot saves you from paying for another one, you can help keep it running:
 
-## 🛠 Tech Stack
+- ❤️ Support on **[Patreon](https://www.djdikkat.com/patreon)**. Nothing is ever required.
+- ⬆️ Vote on **[Top.gg](https://www.djdikkat.com/vote)** so more servers find it.
+- 🐛 Found a bug? **[Open an issue](https://github.com/Yanoee/DJDikkat_MusicBot/issues)**.
 
-- **Debian 12 (Bookworm)** - production server environment
-- **Node.js ≥ 24** - runtime, runs the TypeScript directly (type stripping, no build step)
-- **Discord.js v14** - Discord API wrapper
-- **Shoukaku v4** - NodeLink/Lavalink client for Node.js
-- **NodeLink** - audio streaming backend
-- **Spotify Web API** - track metadata and resolution for Spotify links
-- **MariaDB 10.11** + **mysql2** - persistent storage
-- **TypeScript** - strict, type-checked with `npm run typecheck`; no framework, no bloat
+### 🖤 Dedication
 
-### 🗄 Database setup (self-hosting)
+This project is dedicated to **DJ Dikkat (Mehmet Aykın)**. It is not official and not affiliated, just a small personal tribute built with respect.
 
-Since v5.0.0 the bot stores its data in MariaDB instead of JSON files.
+### License
 
-```sql
-CREATE DATABASE djdikkat CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'djdikkat'@'localhost' IDENTIFIED BY 'change-me';
-GRANT ALL PRIVILEGES ON djdikkat.* TO 'djdikkat'@'localhost';
-```
-
-Add to `djdikkat/.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Tables are created on first start.
-Then `npm install` and `npm start` (reads `djdikkat/.env`). `npm run typecheck` runs the TypeScript compiler without emitting anything; `npm test` runs the search engine checks.
-
----
-
-## 🖤 Dedication
-
-This project is dedicated to **DJ Dikkat (Mehmet Aykın)**.  
-It is not official, not affiliated, and not monetized, just a small personal tribute built with respect.
-
----
-
-## ❤️ Support the Project
-
-DJ DIKKAT is free forever. If it saved you from paying for another bot, consider supporting on Patreon.
-
-~ [patreon.com/Yanoee](https://www.patreon.com/Yanoee)
-
-Every patron helps keep the server running. Nothing is ever required.
-
----
-
-## 📜 License
-
-[MIT](LICENSE) - do what you want, just don't claim it's yours.
-
-### Author
-- [@Yanoee](https://www.github.com/Yanoee)
+[MIT](LICENSE): do what you want, just don't claim it's yours. Made by [@Yanoee](https://github.com/Yanoee).

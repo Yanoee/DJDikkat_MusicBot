@@ -3,9 +3,10 @@
  * Panel API
  * Localhost routes for the website's server panel (/panel/*),
  * authenticated with WEB_BOT_PANEL_SECRET. Every action carries
- * the acting Discord user and re-checks their LIVE permission
- * (Manage Server or Administrator) — the website's session is
- * never trusted on its own.
+ * the acting Discord user and re-checks their LIVE panel level
+ * (Manage Server / Administrator, or a role / person on the
+ * server's Panel access list) — the website's session is never
+ * trusted on its own.
  * Author: Yanoee
  ************************************************************/
 import { GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
@@ -22,7 +23,9 @@ import { totalPlays } from '../services/stats.ts';
 import { setGuildLocale } from '../services/locale.ts';
 import { getMaintenance, maintenanceBlocks } from '../services/config-store.ts';
 import { guildLocale } from '../services/locale.ts';
-import { TEXT_TYPES, VOICE_TYPES, getPermissions, isManager, sanitizePermissions, savePermissions } from '../services/access.ts';
+import { PANEL_RANK, TEXT_TYPES, VOICE_TYPES, getPermissions, panelLevel, sanitizePanel, sanitizePermissions, savePermissions } from '../services/access.ts';
+import type { PanelGrant, PanelLevel } from '../services/access.ts';
+import { giveRole, sendAccessRemoved, sendPanelInvite, takeRole } from '../services/panel-invite.ts';
 import { getWelcome, renderCard, sanitizeWelcome, saveWelcome, sendGreeting, welcomeProblem } from '../services/greeting.ts';
 import { featureNeeds, getFeatures, saveFeatures } from '../services/features.ts';
 import { t } from '../i18n/index.ts';
@@ -38,6 +41,7 @@ type Body = Record<string, unknown>;
 type Reply = [status: number, data: unknown];
 
 const MAX_QUEUE = 25;
+const MEMBER_LIST = 1000;   // members shown in the Panel access picker; bigger servers search by name
 const RESOLVE_CONCURRENCY = 5;
 const str = (v: unknown, max = 300) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 const int = (v: unknown) => typeof v === 'number' && Number.isInteger(v) ? v : -1;
@@ -148,12 +152,13 @@ async function resolveAll(client: Client, uris: string[]): Promise<Track[]> {
 }
 
 export function buildPanelRoutes(client: Client<true>) {
-  /** The acting member, if they may manage this guild right now. */
-  async function actor(guild: Guild, body: Body): Promise<GuildMember | null> {
+  /** The acting member and their panel level, if it's at least `need` right now. */
+  async function actor(guild: Guild, body: Body, need: PanelLevel): Promise<{ member: GuildMember; level: PanelLevel } | null> {
     const userId = str(body.userId, 20);
     if (!/^\d{17,20}$/.test(userId)) return null;
     const member = await guild.members.fetch(userId).catch(() => null);
-    return member && isManager(member) ? member : null;
+    const level = member ? panelLevel(member) : null;
+    return member && level && PANEL_RANK[level] >= PANEL_RANK[need] ? { member, level } : null;
   }
 
   /** Player for a web action that needs one: the existing one, else join the actor's voice channel. */
@@ -273,12 +278,53 @@ export function buildPanelRoutes(client: Client<true>) {
     return [400, { error: 'invalid' }];
   }
 
-  /** Settings from the Permissions and Welcome pages (Manage Server only; not blocked by maintenance). */
-  async function configure(guild: Guild, member: GuildMember, body: Body): Promise<Reply> {
+  /** Settings from the Permissions and Welcome pages (panel level 1 or admin; not blocked by maintenance). */
+  async function configure(guild: Guild, member: GuildMember, level: PanelLevel, body: Body): Promise<Reply> {
     switch (str(body.op, 20)) {
-      case 'permissions':
-        savePermissions(guild.id, sanitizePermissions(guild, body.data));
-        return [200, { ok: true, permissions: getPermissions(guild.id) }];
+      case 'permissions': {
+        const perms = sanitizePermissions(guild, body.data);
+        const invites: { id: string; name: string; ok: boolean | null; role: boolean | null }[] = [];
+        let removed: PanelGrant[] = [];
+        // The Panel access list is Manage Server only, so level 1 can't hand out access.
+        if (level === 'admin') {
+          const before = new Map(perms.panel.filter(g => g.type === 'user').map(g => [g.id, g]));
+          const rawPanel = (body.data as Body | undefined)?.panel;
+          perms.panel = await sanitizePanel(guild, rawPanel);
+          // New people: the optional Discord role, then the invite DM (admins already have access).
+          // People already listed keep their invite status and the role the panel gave them.
+          // ponytail: roles and invites go out one by one inside the save request; fine for a few at a time.
+          for (const g of perms.panel) {
+            if (g.type !== 'user') continue;
+            const prev = before.get(g.id);
+            if (prev) { Object.assign(g, { invite: prev.invite, role: prev.role }); continue; }
+            const asked = (Array.isArray(rawPanel) ? rawPanel as (Body | null)[] : []).find(r => r?.type === 'user' && r.id === g.id)?.giveRole;
+            const roleOk = typeof asked === 'string' ? await giveRole(guild, member, g.id, asked) : null;
+            if (roleOk) g.role = asked as string;
+            const target = guild.members.cache.get(g.id);
+            const ok = target && panelLevel(target) === 'admin' ? null : await sendPanelInvite(guild, g.id, g.level, member.displayName);
+            if (ok !== null) g.invite = ok ? 'sent' : 'failed';
+            invites.push({ id: g.id, name: g.name ?? g.id, ok, role: roleOk });
+          }
+          const kept = new Set(perms.panel.map(g => g.id));
+          removed = [...before.values()].filter(g => !kept.has(g.id));
+        }
+        savePermissions(guild.id, perms);
+        for (const g of removed) {
+          if (g.role) await takeRole(guild, g.id, g.role);
+          await sendAccessRemoved(guild, g.id);
+        }
+        return [200, { ok: true, permissions: getPermissions(guild.id), invites }];
+      }
+      case 'invite': { // "Send again" for one person on the Panel access list
+        if (level !== 'admin') return [403, { error: 'forbidden' }];
+        const perms = getPermissions(guild.id);
+        const grant = perms.panel.find(g => g.type === 'user' && g.id === str(body.target, 20));
+        if (!grant) return [404, { error: 'not_found' }];
+        const ok = await sendPanelInvite(guild, grant.id, grant.level, member.displayName);
+        grant.invite = ok ? 'sent' : 'failed';
+        savePermissions(guild.id, perms);
+        return [200, { ok, permissions: getPermissions(guild.id) }];
+      }
       case 'welcome': {
         const welcome = sanitizeWelcome(guild, body.data);
         const problem = welcome.enabled ? welcomeProblem(welcome, guild) : null;
@@ -335,17 +381,28 @@ export function buildPanelRoutes(client: Client<true>) {
     if (method === 'GET' && path === '/panel/status') {
       return [200, { guilds: client.guilds.cache.size, active: getActiveVoiceCount(), played: totalPlays() }];
     }
-    // Which of these guilds the bot is in (filters a user's manageable servers).
+    // Which of these guilds the bot is in (a user's manageable servers), plus the other
+    // servers of the user where the Panel access list lets them in (login), with their level.
     if (method === 'POST' && path === '/panel/guilds') {
-      const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === 'string').slice(0, 200) : [];
-      const guilds = ids.map(id => client.guilds.cache.get(id)).filter((g): g is Guild => !!g).map(g => {
+      const list = (v: unknown) => Array.isArray(v) ? v.filter((id): id is string => typeof id === 'string').slice(0, 200) : [];
+      const view = (g: Guild, level: PanelLevel) => {
         const state = peekState(g.id);
-        return { id: g.id, name: g.name, icon: g.iconURL({ size: 64 }), playing: !!state?.current, track: state?.current?.info.title ?? null };
-      });
+        return { id: g.id, name: g.name, icon: g.iconURL({ size: 64 }), playing: !!state?.current, track: state?.current?.info.title ?? null, level };
+      };
+      const guilds = list(body.ids).map(id => client.guilds.cache.get(id)).filter((g): g is Guild => !!g).map(g => view(g, 'admin'));
+      const userId = str(body.userId, 20);
+      if (/^\d{17,20}$/.test(userId)) {
+        for (const g of list(body.granted).map(id => client.guilds.cache.get(id))) {
+          if (!g || !getPermissions(g.id).panel.length) continue;
+          const member = await g.members.fetch(userId).catch(() => null);
+          const level = member ? panelLevel(member) : null;
+          if (level) guilds.push(view(g, level));
+        }
+      }
       return [200, { guilds }];
     }
 
-    const m = path.match(/^\/panel\/guild\/(\d{17,20})\/(state|action|member|meta|config|avatars)$/);
+    const m = path.match(/^\/panel\/guild\/(\d{17,20})\/(state|action|member|meta|config|avatars|members)$/);
     if (!m) return null;
     const guild = client.guilds.cache.get(m[1]!);
     if (!guild) return [404, { error: 'not_in_guild' }];
@@ -362,12 +419,28 @@ export function buildPanelRoutes(client: Client<true>) {
       }));
       return [200, { avatars: Object.fromEntries(avatars) }];
     }
+    // Members for the Panel access list (the website only lets admins call it): the server's
+    // members straight from Discord (first 1000), or a name search for bigger servers.
+    if (method === 'GET' && m[2] === 'members') {
+      const q = (new URLSearchParams(query).get('q') ?? '').trim().slice(0, 32);
+      const found = q.length >= 2
+        ? await guild.members.search({ query: q, limit: 25 }).catch(() => null)
+        : await guild.members.list({ limit: MEMBER_LIST }).catch(() => null);
+      const members = [...(found?.values() ?? [])].filter(mb => !mb.user.bot)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName))
+        .map(mb => ({
+          id: mb.id, name: mb.displayName, username: mb.user.username, avatar: mb.displayAvatarURL({ size: 64 }),
+          roles: mb.roles.cache.filter(r => r.id !== guild.id).sort((a, b) => b.position - a.position).map(r => r.id).slice(0, 4),
+          admin: panelLevel(mb) === 'admin'
+        }));
+      return [200, { members, more: !q && (found?.size ?? 0) >= MEMBER_LIST }];
+    }
 
     if (method === 'POST' && m[2] === 'config') {
-      const member = await actor(guild, body);
-      if (!member) return [403, { error: 'forbidden' }];
+      const who = await actor(guild, body, 'full');
+      if (!who) return [403, { error: 'forbidden' }];
       try {
-        return await configure(guild, member, body);
+        return await configure(guild, who.member, who.level, body);
       } catch (err) {
         const appErr = logError(err, { guildId: guild.id, during: `panel config ${str(body.op, 20)}` });
         return [500, { error: 'server', ref: appErr.ref }];
@@ -375,12 +448,15 @@ export function buildPanelRoutes(client: Client<true>) {
     }
 
     if (method === 'POST' && m[2] === 'member') {
-      return [200, { canManage: !!await actor(guild, body) }];
+      const who = await actor(guild, body, 'dj');
+      return [200, { canManage: !!who, level: who?.level ?? null }];
     }
 
     if (method === 'POST' && m[2] === 'action') {
-      const member = await actor(guild, body);
-      if (!member) return [403, { error: 'forbidden' }];
+      const who = await actor(guild, body, 'dj');
+      // The server language lives on the Settings tab: level 1 and up.
+      if (!who || (body.action === 'locale' && who.level === 'dj')) return [403, { error: 'forbidden' }];
+      const { member } = who;
       const blocked = maintenanceFor(member.id, guild.id);
       if (blocked) return [423, { error: 'maintenance', ...blocked, state: stateView(guild, member.id) }];
       try {

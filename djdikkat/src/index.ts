@@ -25,6 +25,7 @@ import * as dmStore from './services/dm-store.ts';
 import * as configStore from './services/config-store.ts';
 import { onMemberJoin } from './services/greeting.ts';
 import { giveAutoroles, onMemberLeave } from './services/features.ts';
+import { onPanelRoleGained } from './services/panel-invite.ts';
 import { errMsg } from './lib/errors.ts';
 import type {} from './lib/types.ts'; // Client.shoukaku augmentation
 
@@ -126,8 +127,10 @@ client.on(Events.GuildMemberAdd, member => {
   giveAutoroles(member).catch(err => console.error(`[AUTOROLE] guild ${member.guild.id} failed:`, err));
 });
 // Auto-role waits for Discord's membership screening ("pending") to be passed.
+// A new role on the Panel access list sends that person the panel invite.
 client.on(Events.GuildMemberUpdate, (old, member) => {
   if (old.pending && !member.pending) giveAutoroles(member).catch(err => console.error(`[AUTOROLE] guild ${member.guild.id} failed:`, err));
+  onPanelRoleGained(old, member).catch(err => console.error(`[INVITE] guild ${member.guild.id} failed:`, err));
 });
 client.on(Events.GuildMemberRemove, member => {
   onMemberLeave(member).catch(err => console.error(`[LEAVE] guild ${member.guild.id} failed:`, err));

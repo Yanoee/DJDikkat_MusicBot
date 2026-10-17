@@ -19,6 +19,7 @@ export interface GuildFeatures {
   autorole: { enabled: boolean; roles: string[] };
   links: { enabled: boolean; mode: 'invites' | 'all'; allow: string[]; ruleId: string | null };
   words: { enabled: boolean; words: string[]; presets: number[]; ruleId: string | null; presetRuleId: string | null };
+  reminder: { enabled: boolean };   // the weekly "free, Patreon if you like" post
 }
 
 const MAX_AUTOROLES = 5;
@@ -35,7 +36,8 @@ export const defaultFeatures = (): GuildFeatures => ({
   leave: { enabled: false, channelId: null, text: '' },
   autorole: { enabled: false, roles: [] },
   links: { enabled: false, mode: 'invites', allow: [], ruleId: null },
-  words: { enabled: false, words: [], presets: [], ruleId: null, presetRuleId: null }
+  words: { enabled: false, words: [], presets: [], ruleId: null, presetRuleId: null },
+  reminder: { enabled: true }
 });
 
 export function getFeatures(guildId: string): GuildFeatures {
@@ -46,7 +48,8 @@ export function getFeatures(guildId: string): GuildFeatures {
     leave: { ...base.leave, ...saved.leave },
     autorole: { ...base.autorole, ...saved.autorole },
     links: { ...base.links, ...saved.links },
-    words: { ...base.words, ...saved.words }
+    words: { ...base.words, ...saved.words },
+    reminder: { ...base.reminder, ...saved.reminder }
   };
 }
 
@@ -58,7 +61,8 @@ export function featureNeeds(guild: Guild): Record<keyof GuildFeatures, string[]
     leave: [],
     autorole: has(PermissionFlagsBits.ManageRoles) ? [] : ['manage_roles'],
     links: has(PermissionFlagsBits.ManageGuild) ? [] : ['manage_guild'],
-    words: has(PermissionFlagsBits.ManageGuild) ? [] : ['manage_guild']
+    words: has(PermissionFlagsBits.ManageGuild) ? [] : ['manage_guild'],
+    reminder: []
   };
 }
 
@@ -86,7 +90,8 @@ export function sanitizeFeatures(guild: Guild, input: unknown, current: GuildFea
       enabled: on('words'), words: list(raw.words?.words, MAX_WORDS, 60),
       presets: Array.isArray(raw.words?.presets) ? PRESETS.filter(p => (raw.words!.presets as unknown[]).includes(p)) : [],
       ruleId: current.words.ruleId, presetRuleId: current.words.presetRuleId
-    }
+    },
+    reminder: { enabled: raw.reminder ? on('reminder') : current.reminder.enabled }
   };
 }
 

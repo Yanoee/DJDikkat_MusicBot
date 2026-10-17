@@ -6,21 +6,23 @@
  * or logged); only its SHA-256 is stored, for 10 minutes.
  * Author: Yanoee
  ************************************************************/
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } from 'discord.js';
 import { createClaim } from '../services/claims.ts';
 import { trackDm } from '../services/dm-store.ts';
+import { panelLevel } from '../services/access.ts';
 import { config } from '../config.ts';
 import { t } from '../i18n/index.ts';
-import { slash, say, edit, canManageGuild, userLocale } from './shared.ts';
+import { slash, say, edit, userLocale } from './shared.ts';
 import type { Command } from './shared.ts';
 
 const CLAIM_TTL_MS = 10 * 60 * 1000;
 
+// Open to everyone in Discord's menu: people on the server's Panel access list need it too.
 export const panel: Command = {
-  data: slash('panel', 'cmd.panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+  data: slash('panel', 'cmd.panel'),
 
   async execute(interaction) {
-    if (!canManageGuild(interaction)) return say(interaction, 'common.manage_server_only');
+    if (!interaction.inCachedGuild() || !panelLevel(interaction.member)) return say(interaction, 'panel.no_access');
     if (!config.internal.panelSecret) return say(interaction, 'panel.disabled');
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

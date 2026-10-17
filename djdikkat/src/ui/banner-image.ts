@@ -158,6 +158,166 @@ export async function renderWelcome(card: WelcomeImage): Promise<Buffer> {
   return canvas.encode('png');
 }
 
+// ── Support banner (weekly reminder) ──────────────────────
+
+const PINK = '#e8559a', PINK_HOT = '#ff7ab8';
+
+function heart(ctx: SKRSContext2D, x: number, y: number, s: number, fill: string, angle = 0): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(s / 32, s / 32);
+  ctx.beginPath();
+  ctx.moveTo(0, 10);
+  ctx.bezierCurveTo(-26, -8, -14, -30, 0, -16);
+  ctx.bezierCurveTo(14, -30, 26, -8, 0, 10);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Pink twin of the launch banner: a big glowing heart where the record sits, small hearts drifting around it. */
+export async function renderSupport(text: { kicker: string; tagline: string; locale: string }): Promise<Buffer> {
+  const canvas = createCanvas(LW, LH);
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, LW, LH);
+  g.addColorStop(0, '#2a1820');
+  g.addColorStop(1, C.bg);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, LW, LH);
+  glow(ctx, 930, 250, 440, PINK, 0.32);
+  glow(ctx, 120, 60, 300, PINK_HOT, 0.1);
+
+  // Drifting hearts (fixed spots so every post looks the same)
+  const drift: [number, number, number, number, number][] = [
+    [700, 90, 26, -0.3, 0.35], [760, 400, 34, 0.25, 0.3], [1120, 80, 30, 0.35, 0.4], [1150, 420, 22, -0.2, 0.35],
+    [640, 250, 16, 0.15, 0.25], [1080, 250, 18, -0.4, 0.3], [820, 40, 14, 0.2, 0.25], [520, 455, 18, -0.25, 0.2], [450, 60, 14, 0.3, 0.18]
+  ];
+  for (const [x, y, s, a, alpha] of drift) heart(ctx, x, y, s, hexAlpha(PINK_HOT, alpha), a);
+
+  // Big heart with a soft halo and a shine
+  ctx.shadowColor = hexAlpha(PINK, 0.8);
+  ctx.shadowBlur = 60;
+  heart(ctx, 930, 262, 300, PINK);
+  ctx.shadowBlur = 0;
+  heart(ctx, 930, 262, 220, PINK_HOT);
+  heart(ctx, 900, 225, 54, 'rgba(255,255,255,0.22)', -0.35);
+
+  ctx.fillStyle = PINK;
+  ctx.fillRect(0, 0, 10, LH);
+
+  const TX = 70;
+  ctx.textBaseline = 'alphabetic';
+  ctx.letterSpacing = '7px';
+  ctx.font = `24px ${MONO}`;
+  ctx.fillStyle = PINK_HOT;
+  ctx.fillText(text.kicker.toLocaleUpperCase(text.locale), TX, 150);
+
+  ctx.letterSpacing = '2px';
+  ctx.font = `bold 150px ${SANS}`;
+  ctx.fillStyle = C.text;
+  ctx.fillText('DJ', TX, 292);
+  ctx.fillStyle = PINK;
+  ctx.fillText('DIKKAT', TX + ctx.measureText('DJ ').width, 292);
+
+  ctx.letterSpacing = '0.5px';
+  let size = 34;
+  do ctx.font = `${size}px ${SANS}`; while (ctx.measureText(text.tagline).width > 600 && --size > 24);
+  ctx.fillStyle = C.text;
+  ctx.fillText(fit(ctx, text.tagline, 600), TX, 352);
+  heart(ctx, TX + 12, 400, 26, PINK);
+
+  grain(ctx, LW, LH, 0.045);
+  return canvas.encode('png');
+}
+
+// ── Panel invite banner (DM to someone given panel access) ─
+
+export interface InviteImage { kicker: string; server: string; badge: string; level: 1 | 2; iconUrl: string | null; locale: string }
+
+/** Server icon in a glowing frame on the right, the server name and a big level badge on the left. */
+export async function renderInvite(card: InviteImage): Promise<Buffer> {
+  const canvas = createCanvas(LW, LH);
+  const ctx = canvas.getContext('2d');
+  const tone = card.level === 1 ? '#c97425' : C.accentHot;
+  const g = ctx.createLinearGradient(0, 0, LW, LH);
+  g.addColorStop(0, C.panel);
+  g.addColorStop(1, C.bg);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, LW, LH);
+  glow(ctx, 930, 250, 430, tone, 0.3);
+  glow(ctx, 120, 60, 300, C.accent, 0.1);
+  ctx.strokeStyle = 'rgba(226,219,211,0.035)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < LW; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, LH); ctx.stroke(); }
+  for (let y = 0; y < LH; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(LW, y); ctx.stroke(); }
+
+  // Server icon (or the first letter) in a framed square with two offset outlines
+  const S = 230, IX = 930 - S / 2, IY = 250 - S / 2;
+  for (const [d, a] of [[34, 0.18], [18, 0.4]] as const) {
+    ctx.strokeStyle = hexAlpha(tone, a);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(IX - d, IY - d, S + d * 2, S + d * 2);
+  }
+  ctx.shadowColor = hexAlpha(tone, 0.7);
+  ctx.shadowBlur = 50;
+  ctx.fillStyle = C.panel;
+  ctx.fillRect(IX, IY, S, S);
+  ctx.shadowBlur = 0;
+  const icon = await loadRemote(card.iconUrl);
+  if (icon) cover(ctx, icon, IX, IY, S, S);
+  else {
+    ctx.font = `bold 120px ${SANS}`;
+    ctx.fillStyle = tone;
+    ctx.textAlign = 'center';
+    ctx.fillText([...card.server][0]?.toLocaleUpperCase(card.locale) ?? '?', 930, 292);
+    ctx.textAlign = 'left';
+  }
+  ctx.strokeStyle = tone;
+  ctx.lineWidth = 6;
+  ctx.strokeRect(IX - 3, IY - 3, S + 6, S + 6);
+
+  ctx.fillStyle = tone;
+  ctx.fillRect(0, 0, 10, LH);
+
+  const TX = 70, TW = 640;
+  ctx.textBaseline = 'alphabetic';
+  ctx.letterSpacing = '7px';
+  ctx.font = `24px ${MONO}`;
+  ctx.fillStyle = tone;
+  ctx.fillText(card.kicker.toLocaleUpperCase(card.locale), TX, 140);
+
+  ctx.letterSpacing = '1px';
+  let size = 104;
+  do ctx.font = `bold ${size}px ${SANS}`; while (ctx.measureText(card.server).width > TW && --size > 56);
+  ctx.fillStyle = C.text;
+  ctx.fillText(fit(ctx, card.server, TW), TX, 250);
+
+  // Level badge
+  ctx.letterSpacing = '4px';
+  ctx.font = `bold 30px ${MONO}`;
+  const label = card.badge.toLocaleUpperCase(card.locale);
+  const bw = ctx.measureText(label).width + 56;
+  ctx.fillStyle = hexAlpha(tone, 0.16);
+  ctx.fillRect(TX, 296, bw, 70);
+  ctx.strokeStyle = hexAlpha(tone, 0.7);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(TX + 1, 297, bw - 2, 68);
+  ctx.fillStyle = tone;
+  ctx.fillRect(TX, 296, 6, 70);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, TX + 30, 342);
+
+  ctx.letterSpacing = '4px';
+  ctx.font = `15px ${MONO}`;
+  ctx.fillStyle = C.faint;
+  ctx.fillText('DJ DIKKAT', TX, LH - 40);
+
+  grain(ctx, LW, LH, 0.045);
+  return canvas.encode('png');
+}
+
 // ── Launch banner ─────────────────────────────────────────
 
 const LW = 1200, LH = 500;

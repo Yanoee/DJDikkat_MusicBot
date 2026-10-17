@@ -5,7 +5,10 @@
  * DM, each in the guild's language.
  * Author: Yanoee
  ************************************************************/
-import { AuditLogEvent, EmbedBuilder, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import {
+  AuditLogEvent, AttachmentBuilder, EmbedBuilder, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder,
+  MediaGalleryBuilder, MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder
+} from 'discord.js';
 import type { Client, Guild, GuildBasedChannel, SendableChannels } from 'discord.js';
 import { getGuildMemory, setGuildSettings } from './memory.ts';
 import type { GuildSettings } from './memory.ts';
@@ -14,24 +17,35 @@ import { errMsg } from '../lib/errors.ts';
 import { config } from '../config.ts';
 import { t } from '../i18n/index.ts';
 import { buildSetupCard } from '../ui/setup-card.ts';
+import { renderSupport } from '../ui/banner-image.ts';
+import { getFeatures } from './features.ts';
 import type { Locale } from '../i18n/index.ts';
 
 const ANNOUNCEMENT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const issuesUrl = () => `${config.links.github}/issues`;
 
-function buildAnnouncementEmbed(locale: Locale): EmbedBuilder {
-  return new EmbedBuilder()
-    .setTitle(t(locale, 'announce.title'))
-    .setColor(0x2b6cb0)
-    .setDescription(t(locale, 'announce.body'))
-    .addFields(
-      { name: t(locale, 'announce.free.name'),    value: t(locale, 'announce.free.value') },
-      { name: t(locale, 'announce.support.name'), value: t(locale, 'announce.support.value', { url: config.links.patreon }) },
-      { name: t(locale, 'announce.website.name'), value: t(locale, 'announce.website.value', { url: config.publicUrl }) },
-      { name: t(locale, 'announce.bug.name'),     value: t(locale, 'announce.bug.value', { url: issuesUrl() }) }
-    )
-    .setFooter({ text: t(locale, 'announce.footer') })
-    .setTimestamp();
+const IMAGE = 'support.png';
+const banners = new Map<Locale, Promise<Buffer>>();
+
+/** The weekly card: pink, hearts, free forever, Patreon if it comes from the heart. Banner drawn once per language. */
+export async function buildAnnouncementCard(guildId: string, locale: Locale) {
+  if (!banners.has(locale)) {
+    banners.set(locale, renderSupport({ kicker: t(locale, 'announce.img.kicker'), tagline: t(locale, 'announce.img.tagline'), locale }));
+  }
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'announce.btn.support')).setEmoji('💖').setURL(config.links.patreon),
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.panel')).setEmoji('🎛️').setURL(`${config.publicUrl}/dashboard/${guildId}`),
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.bug')).setEmoji('🐛').setURL(issuesUrl()),
+    new ButtonBuilder().setCustomId(`announce:remove:${guildId}`).setLabel(t(locale, 'announce.remove')).setEmoji('🗑️').setStyle(ButtonStyle.Secondary)
+  );
+  const card = new ContainerBuilder().setAccentColor(0xe8559a)
+    .addMediaGalleryComponents(new MediaGalleryBuilder().addItems(item => item.setURL(`attachment://${IMAGE}`)))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${t(locale, 'announce.title')}\n${t(locale, 'announce.body')}`))
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addActionRowComponents(buttons)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${t(locale, 'announce.footer')}`));
+  const file = new AttachmentBuilder(await banners.get(locale)!, { name: IMAGE });
+  return { components: [card], files: [file], flags: MessageFlags.IsComponentsV2 as const };
 }
 
 function sendableIn(channel: GuildBasedChannel | undefined, guild: Guild): SendableChannels | null {
@@ -79,15 +93,12 @@ export async function sendCustomToAll(client: Client, payload: { title?: string;
 export async function sendAnnouncement(guild: Guild | null, preferredChannelId: string | null = null): Promise<boolean> {
   if (!guild) return false;
   const { settings } = getGuildMemory(guild.id);
-  if (!announcementDue(settings)) return false;
+  if (!getFeatures(guild.id).reminder.enabled || !announcementDue(settings)) return false;
   const channel = findAnnouncementChannel(guild, settings, preferredChannelId);
   if (!channel) return false;
 
-  const locale = guildLocale(guild.id, guild);
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`announce:remove:${guild.id}`).setLabel(t(locale, 'announce.remove')).setEmoji('🗑️').setStyle(ButtonStyle.Danger)
-  );
-  const message = await channel.send({ embeds: [buildAnnouncementEmbed(locale)], components: [row] }).catch(() => null);
+  const card = await buildAnnouncementCard(guild.id, guildLocale(guild.id, guild));
+  const message = await channel.send(card).catch(() => null);
   if (!message) return false;
 
   setGuildSettings(guild.id, { lastAnnouncementAt: new Date().toISOString(), defaultTextChannelId: channel.id });

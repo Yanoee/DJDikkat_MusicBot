@@ -5,3 +5,9 @@ node_modules/
 logs/
 .DS_Store
 Thumbs.db
+
+# Secrets: any env file, wherever it sits, and local backups
+*.env
+*.env.*
+!.env.example
+backup/

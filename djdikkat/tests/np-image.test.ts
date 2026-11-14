@@ -12,3 +12,14 @@ test('renders a PNG without artwork, live and paused', async () => {
     assert.deepEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47]); // "PNG"
   }
 });
+
+test('status chips: drawn when on, the image changes, too many still render', async () => {
+  const base = {
+    title: 'Bobiturma', artist: 'Macroblack', artworkUrl: null, positionMs: 61000, lengthMs: 200000,
+    paused: false, label: 'Now playing', liveLabel: 'Live', source: 'YouTube', locale: 'tr'
+  };
+  const plain = await renderNowPlaying(base);
+  const many = await renderNowPlaying({ ...base, chips: ['Nightcore', '♾ Otomatik', '🔂 Şarkı tekrarı', 'Slowed + reverb', 'Extra', 'More'] });
+  assert.deepEqual([...many.subarray(1, 4)], [0x50, 0x4e, 0x47]);
+  assert.ok(many.length > plain.length * 0.5 && !many.equals(plain));
+});

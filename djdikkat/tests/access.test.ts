@@ -27,3 +27,35 @@ test('panel levels: admin, grants by member and role, highest wins, nothing othe
   assert.equal(panelLevel(member('u-dj', ['modrole'])), 'full');
   assert.equal(panelLevel(member('x', ['other'])), null);
 });
+
+// Normal mode: everyone plays/pauses, DJ for the rest; alone in voice or your own song (skip) passes.
+import { denial, normalPermissions } from '../src/services/access.ts';
+import { getState } from '../src/music/state.ts';
+
+const VOICE = { id: 'vc', humans: 2 };
+const voiceMember = (id: string, roles: string[], opts: { manager?: boolean; inVoice?: boolean } = {}) => ({
+  id,
+  guild: { id: GUILD, members: { me: { voice: { channel: { id: VOICE.id, members: { filter: () => ({ size: VOICE.humans }) } } } } } },
+  roles: { cache: new Map(roles.map(r => [r, {}])) },
+  permissions: { has: (flag: bigint) => !!opts.manager && flag === PermissionFlagsBits.ManageGuild },
+  voice: { channelId: opts.inVoice === false ? null : VOICE.id }
+}) as never;
+
+test('normal mode: DJ keys need the role, the rest is open; own song, alone, admins and no-role pass', () => {
+  getGuildMemory(GUILD).settings.permissions = normalPermissions('djrole');
+  getState(GUILD).current = { requesterId: 'adder' } as never;
+  VOICE.humans = 2;
+  const user = voiceMember('user', []);
+  for (const key of ['play', 'playlist', 'pause', 'queue', 'history', 'stats'] as const) assert.equal(denial(user, key, null), null, key);
+  for (const key of ['skip', 'stop', 'disconnect', 'loop', 'shuffle', 'filter', 'autoplay', 'clear'] as const) assert.equal(denial(user, key, null)?.key, 'perm.role', key);
+  assert.equal(denial(voiceMember('adder', []), 'skip', null), null);                 // their own song
+  assert.equal(denial(voiceMember('adder', []), 'stop', null)?.key, 'perm.role');     // but not stop
+  assert.equal(denial(voiceMember('dj', ['djrole']), 'stop', null), null);
+  assert.equal(denial(voiceMember('boss', [], { manager: true }), 'disconnect', null), null);
+  VOICE.humans = 1;
+  assert.equal(denial(user, 'stop', null), null);                                      // alone with the bot
+  assert.equal(denial(voiceMember('away', [], { inVoice: false }), 'stop', null)?.key, 'perm.role');
+  VOICE.humans = 2;
+  getGuildMemory(GUILD).settings.permissions = normalPermissions(null);
+  assert.equal(denial(user, 'stop', null), null);                                      // no DJ role yet: nobody locked out
+});

@@ -3,14 +3,16 @@
  * Player card
  * The "Now Playing" / idle card and its buttons, in the
  * guild's language. Discord components v2, the website's
- * player look: the picture, one small line and a row of icon
- * buttons, redrawn every 15 s so the progress bar moves.
+ * player look: one framed container (the server's accent)
+ * with the wide picture, one small line and the controls,
+ * redrawn every 15 s so the progress bar moves.
  * Author: Yanoee
  ************************************************************/
 import {
   ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
-  MessageFlags, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder, ThumbnailBuilder
+  MessageFlags, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, StringSelectMenuBuilder, TextDisplayBuilder, ThumbnailBuilder
 } from 'discord.js';
+import { FILTERS } from '../music/filters.ts';
 import type { Client, Message, SendableChannels } from 'discord.js';
 import { getInactivityRemaining, clearIdleUiTimer } from '../music/state.ts';
 import type { GuildState } from '../music/state.ts';
@@ -19,6 +21,7 @@ import { guildLocaleVia } from '../services/locale.ts';
 import { logError } from '../lib/errors.ts';
 import { renderNowPlaying } from './np-image.ts';
 import { t } from '../i18n/index.ts';
+import { getFeatures, getTransitions } from '../services/features.ts';
 import type { Locale } from '../i18n/index.ts';
 import { config } from '../config.ts';
 
@@ -106,8 +109,16 @@ function parseTrackMeta(title: string, uri: string | undefined): { artist: strin
   return { artist: null, trackTitle: title || null };
 }
 
-const who = (track: { requesterId?: string; requesterTag?: string }, locale: Locale) =>
-  track.requesterId ? `<@${track.requesterId}>` : (track.requesterTag || t(locale, 'common.unknown'));
+/** Seed titles in "Autoplay · like {title}": long enough to recognise, short enough for one line. */
+const AUTOPLAY_FROM_LIMIT = 40;
+const autoplayFrom = (track: { autoplayFrom?: string }) =>
+  track.autoplayFrom?.trim() ? truncate(track.autoplayFrom.trim(), AUTOPLAY_FROM_LIMIT) : null;
+
+const who = (track: { requesterId?: string; requesterTag?: string; autoplayFrom?: string }, locale: Locale) => {
+  if (track.requesterId) return `<@${track.requesterId}>`;
+  const from = autoplayFrom(track);
+  return from ? t(locale, 'card.autoplay_from', { title: from }) : (track.requesterTag || t(locale, 'common.unknown'));
+};
 
 const NP_IMAGE = 'np.png';
 const text = (content: string) => new TextDisplayBuilder().setContent(content);
@@ -160,28 +171,46 @@ function idleCard(guildId: string, state: GuildState, locale: Locale): Container
   return card.addActionRowComponents(row(...buttons, panelButton(guildId, locale)));
 }
 
+const plain = (label: string) => label.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+
+/**
+ * What's switched on, for the picture's chips: crossfade, effect, autoplay, loop (words only, no emoji).
+ * Drawn right to left and the leftmost ones dropped when out of room, so crossfade goes first: it's dropped first.
+ */
+function statusChips(guildId: string, state: GuildState, locale: Locale): string[] {
+  const transitions = getTransitions(guildId);
+  return [
+    transitions.enabled && transitions.crossfadeS > 0 ? t(locale, 'card.crossfade', { seconds: transitions.crossfadeS }) : null,
+    state.filter ? t(locale, `fx.${state.filter}`) : null,
+    getFeatures(guildId).autoplay.enabled ? t(locale, 'card.chip.autoplay') : null,
+    state.loopCurrent ? t(locale, 'card.chip.loop_song') : state.loopQueue ? t(locale, 'card.chip.loop_queue') : null
+  ].filter((c): c is string => !!c).map(plain);
+}
+
 /** The picture, one small line (who asked, what's next) and the controls; the website's player look. */
-function playingCard(guildId: string, state: GuildState, locale: Locale, withImage: boolean) {
-  const current = state.current!;
+function playingCard(guildId: string, state: GuildState, current: NonNullable<GuildState['current']>, locale: Locale, withImage: boolean): ContainerBuilder {
   const { info } = current;
-  const parts: (TextDisplayBuilder | MediaGalleryBuilder | ActionRowBuilder<ButtonBuilder>)[] = [];
+  const accent = getGuildMemory(guildId).settings.cardAccent;
+  const card = new ContainerBuilder().setAccentColor(state.paused ? COLORS.paused : accent ? parseInt(accent.slice(1), 16) : COLORS.playing);
 
   // Without the picture, title and artist go in text.
-  if (withImage) parts.push(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${NP_IMAGE}`)));
+  if (withImage) card.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${NP_IMAGE}`)));
   else {
     const { artist, trackTitle } = parseTrackMeta(info.title, info.uri);
-    parts.push(text(`### ${link(truncate(trackTitle ?? t(locale, 'card.unknown_title'), NOW_PLAYING_TITLE_LIMIT), info.uri)}${artist ? `\n${artist}` : ''}`));
+    card.addTextDisplayComponents(text(`### ${link(truncate(trackTitle ?? t(locale, 'card.unknown_title'), NOW_PLAYING_TITLE_LIMIT), info.uri)}${artist ? `\n${artist}` : ''}`));
   }
 
   const [next] = state.queue;
   const meta = [
     withImage ? null : `🙋 ${who(current, locale)}`,
     next ? `${t(locale, 'card.next', { title: link(truncateQueueTitle(next.info.title), next.info.uri) })}${state.queue.length > 1 ? ` ${t(locale, 'card.more', { count: state.queue.length - 1 })}` : ''}` : null,
+    // In the picture's chips when there is a picture
+    !withImage && state.filter ? t(locale, 'card.fx', { name: t(locale, `fx.${state.filter}`) }) : null,
+    !withImage && getFeatures(guildId).autoplay.enabled ? t(locale, 'card.autoplay') : null,
     state.webActor && Date.now() - state.webActor.at < WEB_ACTOR_SHOWN_MS ? t(locale, 'card.via_web', { name: state.webActor.name }) : null
   ].filter(Boolean).join('  ·  ');
-  if (meta) parts.push(text(`-# ${meta}`));   // can be empty: nothing next, requester in the picture
-  parts.push(...buildButtons(guildId, state));
-  return parts;
+  if (meta) card.addTextDisplayComponents(text(`-# ${meta}`));   // can be empty: nothing next, requester in the picture
+  return card.addSeparatorComponents(line()).addActionRowComponents(...buildButtons(guildId, state, locale).map(r => r.toJSON()));
 }
 
 /** The card (components v2) with its rendered picture. Falls back to text if rendering fails. */
@@ -190,9 +219,13 @@ export async function buildPayload(guildId: string, state: GuildState, locale: L
   const base = { flags: MessageFlags.IsComponentsV2 as const, allowedMentions: { parse: [] }, attachments: [] };
   if (!state.current) return { ...base, components: [idleCard(guildId, state, locale)], files: [] };
 
-  const { info, requesterId, requesterTag } = state.current;
+  // Kept: the track can be stopped while the picture renders.
+  const current = state.current;
+  const { info, requesterId, requesterTag } = current;
   const { artist, trackTitle } = parseTrackMeta(info.title, info.uri);
   const member = state.client?.guilds.cache.get(guildId)?.members.cache.get(requesterId);
+  // Autoplay picks say which song they follow; the picture shortens just that title to fit.
+  const from = requesterId ? null : autoplayFrom(current);
   const png = await renderNowPlaying({
     title: trackTitle ?? t(locale, 'card.unknown_title'),
     artist: artist ?? info.author ?? null,
@@ -204,12 +237,15 @@ export async function buildPayload(guildId: string, state: GuildState, locale: L
     liveLabel: t(locale, 'card.live'),
     source: sourceLabel(info.uri, locale),
     accent: getGuildMemory(guildId).settings.cardAccent,
-    requester: requesterTag ? { name: member?.displayName ?? requesterTag, avatarUrl: member?.displayAvatarURL({ extension: 'png', size: 64 }) ?? null } : null,
+    requester: from
+      ? { name: t(locale, 'card.autoplay_from', { title: '{title}' }), title: from, avatarUrl: null, label: t(locale, 'card.requested_by') }
+      : requesterTag ? { name: member?.displayName ?? requesterTag, avatarUrl: member?.displayAvatarURL({ extension: 'png', size: 128 }) ?? null, label: t(locale, 'card.requested_by') } : null,
+    chips: statusChips(guildId, state, locale),
     locale
   }).catch(err => { logError(err, { guildId, during: 'render now-playing image' }); return null; });
   return {
     ...base,
-    components: playingCard(guildId, state, locale, !!png),
+    components: [playingCard(guildId, state, current, locale, !!png)],
     files: png ? [new AttachmentBuilder(png, { name: NP_IMAGE })] : []
   };
 }
@@ -240,8 +276,24 @@ async function resolveControllerMessage(guildId: string, client: Client | null):
   return msg;
 }
 
-/** One row, icons only, like the website's player: [⏸] [⏭] [⏹] [🔁] [☰]. Shuffle and Clear live in the queue view. */
-function buildButtons(guildId: string, state: GuildState) {
+const FX_EMOJI: Record<string, string> = {
+  off: '⭕', bass: '🔊', nightcore: '⚡', vaporwave: '🌴', slowed: '🐢', '8d': '🎧', karaoke: '🎤', soft: '☁️', treble: '🔔', echo: '🌊'
+};
+
+/** The effect picker (the current one shown as picked); same as /filter. */
+function effectMenu(guildId: string, state: GuildState, locale: Locale) {
+  const current = state.filter ?? 'off';
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
+    .setCustomId(`fx:${guildId}`)
+    .setPlaceholder(t(locale, 'card.fx_pick'))
+    .addOptions((['off', ...FILTERS] as const).map(f => ({ label: t(locale, `fx.${f}`), value: f, emoji: FX_EMOJI[f], default: f === current }))));
+}
+
+/**
+ * Icons first, like the website's player: [⏸] [⏭] [⏹] [🔁] [☰], then the effect picker,
+ * then Autoplay, Add to playlist and the web panel. Shuffle and Clear live in the queue view.
+ */
+function buildButtons(guildId: string, state: GuildState, locale: Locale) {
   const button = (action: string, emoji: ReturnType<typeof cardIcon>, style: ButtonStyle) =>
     new ButtonBuilder().setCustomId(`music:${action}:${guildId}`).setEmoji(emoji).setStyle(style);
   const loop = button('loop', cardIcon('loop', state.loopCurrent ? '🔂' : '🔁'), state.loopCurrent || state.loopQueue ? ButtonStyle.Success : ButtonStyle.Secondary);
@@ -252,6 +304,10 @@ function buildButtons(guildId: string, state: GuildState) {
     button('stop', cardIcon('stop', '⏹️'), ButtonStyle.Danger),
     loop,
     button('queue', cardIcon('queue', '📜'), ButtonStyle.Secondary)
+  ), effectMenu(guildId, state, locale), row(
+    button('autoplay', cardIcon('autoplay', '♾️'), getFeatures(guildId).autoplay.enabled ? ButtonStyle.Success : ButtonStyle.Secondary).setLabel(t(locale, 'card.btn.autoplay')),
+    button('pladd', cardIcon('plus', '➕'), ButtonStyle.Secondary).setLabel(t(locale, 'card.btn.pladd')),
+    panelButton(guildId, locale)
   )];
 }
 

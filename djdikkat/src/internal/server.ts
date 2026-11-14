@@ -11,6 +11,8 @@ import { ActivityType, PermissionFlagsBits } from 'discord.js';
 import type { Client, PresenceData, PresenceStatusData } from 'discord.js';
 import { sendCustomToAll, sendAnnouncement, sendSetupCard } from '../services/announcement.ts';
 import { launchPlan, launchStatus, sendLaunchPreview, startLaunch, stopLaunch } from '../services/launch.ts';
+import { djModePlan, djModeStatus, sendDjPreview, startDjMode } from '../services/dj-mode.ts';
+import { sendUpdatePreview, startUpdatePost, updatePostPlan, updatePostStatus } from '../services/update-post.ts';
 import { cleanDms, scanAndCleanDms } from '../services/dm-store.ts';
 import { getGuildMemory, getGuildMessagesRaw, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } from '../services/memory.ts';
 import { getGuildStatsRaw } from '../services/stats.ts';
@@ -72,26 +74,69 @@ function applyPresence(client: Client<true>, data: PresenceData): void {
 }
 
 // ── Rotating status ───────────────────────────────────────
-// Shown while no admin presence is pinned and maintenance is off.
-// Discord allows ~5 presence updates a minute, so keep this ≥ 15s.
-const ROTATE_MS = 20_000;
+// Shown while no admin presence is pinned and maintenance is off. The lines
+// and the pace are edited in /admin → Controls → Presence (bot_config
+// "rotation"); without a saved list the defaults below rotate.
+// Placeholders: {servers}, {playing} (a line with it is skipped while nothing
+// plays), {site}. Discord allows ~5 presence updates a minute, so ≥ 15 s.
+export const ROTATION_DEFAULT: readonly string[] = [
+  '🎧 Spinning in {playing} servers right now',
+  '🎉 v7 is live: crossfades, smart autoplay, radio host',
+  '🎚️ Smooth DJ crossfades · /transitions',
+  '🏠 Trusted by {servers} servers',
+  '📻 New: a radio host between songs · /radio',
+  '🎵 /play anything: YouTube, Spotify, SoundCloud',
+  '♾️ Smart autoplay keeps the party going',
+  '🔁 The music never stops, not even for updates',
+  '🎛️ Your free web panel · /panel',
+  '🆓 Every feature free. No premium, no ads',
+  '🇹🇷 Türkçe & English 🇬🇧',
+  '💿 Dakka Records INC.',
+  '🌐 {site}'
+];
+export const ROTATION_LIMITS = { minSeconds: 15, maxSeconds: 600, maxLines: 30, maxLength: 128 } as const;
+const ROTATION_SECONDS = 20;
 let rotateIndex = 0;
+let rotateTimer: NodeJS.Timeout | null = null;
 
-function rotatingLines(client: Client<true>): string[] {
-  return [
-    '🎵 Dakka Records INC.',
-    `🏠 Used in ${client.guilds.cache.size} servers`,
-    `🎧 Playing in ${getActiveVoiceCount()} servers right now`,
-    `🌐 ${new URL(config.publicUrl).host}`,
-    '💡 /play to start'
-  ];
+function rotation(): { lines: string[]; seconds: number; custom: boolean } {
+  const saved = getConfig('rotation');
+  const lines = saved?.lines?.length ? saved.lines : [...ROTATION_DEFAULT];
+  return { lines, seconds: saved?.seconds ?? ROTATION_SECONDS, custom: !!saved?.lines?.length };
+}
+
+/** A saved line with its placeholders filled; null = skip it this round. */
+function fillLine(line: string, client: Client<true>): string | null {
+  const live = getActiveVoiceCount();
+  if (line.includes('{playing}') && !live) return null;
+  return line
+    .replaceAll('{playing}', String(live))
+    .replaceAll('{servers}', String(client.guilds.cache.size))
+    .replaceAll('{site}', new URL(config.publicUrl).host.replace(/^www\./, ''));
 }
 
 function rotatePresence(client: Client<true>): void {
   if (getMaintenance().enabled || getConfig('presence')) return;
-  const lines = rotatingLines(client);
-  const state = lines[rotateIndex++ % lines.length];
+  const lines = rotation().lines.map(l => fillLine(l, client)).filter((l): l is string => !!l);
+  if (!lines.length) return;
+  const state = lines[rotateIndex++ % lines.length]!;
   applyPresence(client, { status: 'online', activities: [{ name: 'custom', state, type: ActivityType.Custom }] });
+}
+
+function scheduleRotation(client: Client<true>): void {
+  if (rotateTimer) clearInterval(rotateTimer);
+  rotateTimer = setInterval(() => rotatePresence(client), rotation().seconds * 1000);
+}
+
+/** Cleans an admin-edited list; null = invalid. */
+function cleanRotation(input: unknown): { lines: string[]; seconds: number } | null {
+  const raw = (input && typeof input === 'object' ? input : {}) as { lines?: unknown; seconds?: unknown };
+  if (!Array.isArray(raw.lines)) return null;
+  const lines = raw.lines.filter((l): l is string => typeof l === 'string').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (!lines.length || lines.length > ROTATION_LIMITS.maxLines || lines.some(l => l.length > ROTATION_LIMITS.maxLength)) return null;
+  const seconds = typeof raw.seconds === 'number' && Number.isFinite(raw.seconds) ? Math.round(raw.seconds) : ROTATION_SECONDS;
+  if (seconds < ROTATION_LIMITS.minSeconds || seconds > ROTATION_LIMITS.maxSeconds) return null;
+  return { lines, seconds };
 }
 
 /** Startup presence: maintenance card, else the admin's pinned one, else the rotation. */
@@ -102,7 +147,7 @@ export function startPresence(client: Client<true>): void {
     if (p) applyPresence(client, toPresenceData(p));
   }
   rotatePresence(client);
-  setInterval(() => rotatePresence(client), ROTATE_MS);
+  scheduleRotation(client);
 }
 
 async function readBody(req: IncomingMessage): Promise<Body> {
@@ -185,6 +230,25 @@ function buildRoutes(client: Client<true>) {
       return [200, { ok: true }];
     },
 
+    // The rotating status lines (Controls → Presence). paused = a pinned status or maintenance hides them.
+    'GET /presence-rotation': () => {
+      const r = rotation();
+      return [200, { ...r, defaults: ROTATION_DEFAULT, limits: ROTATION_LIMITS, paused: getMaintenance().enabled ? 'maintenance' : getConfig('presence') ? 'pinned' : null }];
+    },
+    'POST /presence-rotation': ({ lines, seconds, reset }) => {
+      if (reset === true) {
+        setConfig('rotation', null);
+      } else {
+        const clean = cleanRotation({ lines, seconds });
+        if (!clean) return [400, { error: `1–${ROTATION_LIMITS.maxLines} lines of up to ${ROTATION_LIMITS.maxLength} characters, every ${ROTATION_LIMITS.minSeconds}–${ROTATION_LIMITS.maxSeconds} s` }];
+        setConfig('rotation', clean);
+      }
+      rotateIndex = 0;
+      scheduleRotation(client);
+      rotatePresence(client);
+      return [200, { ok: true, ...rotation() }];
+    },
+
     // While maintenance is on, the presence that was live right before it is
     // kept in 'savedPresence', so switching it off restores the exact old
     // card — even across a restart mid-maintenance.
@@ -264,6 +328,28 @@ function buildRoutes(client: Client<true>) {
         guildId, activate: activate !== false, postToUser: postToUser === true,
         channelId: typeof channelId === 'string' ? channelId : undefined, userId: typeof userId === 'string' ? userId : undefined
       })];
+    },
+    // DJ mode for servers without their own rules: GET = the plan, POST dryRun / confirm "DJ", preview = the admin DM to one user.
+    'GET /dj-mode': async () => [200, { status: djModeStatus(), plan: djModePlan(client) }],
+    'POST /dj-mode': async ({ confirm, dryRun }) => {
+      if (dryRun === true) return [200, { dryRun: true, plan: djModePlan(client) }];
+      if (confirm !== 'DJ') return [400, { error: 'Send {"confirm":"DJ"} to start (or {"dryRun":true}).' }];
+      return startDjMode(client) ? [202, { started: true }] : [409, { error: 'Already running', status: djModeStatus() }];
+    },
+    'POST /dj-mode/preview': async ({ guildId, userId }) => {
+      if (typeof guildId !== 'string' || typeof userId !== 'string') return [400, { error: 'guildId and userId required' }];
+      return [200, { dm: await sendDjPreview(client, guildId, userId) }];
+    },
+    // "What's new" post in every server's channel: GET = the plan, POST dryRun / confirm "UPDATE", preview = DM to one user.
+    'GET /update-post': async () => [200, { status: updatePostStatus(), plan: updatePostPlan(client) }],
+    'POST /update-post': async ({ confirm, dryRun }) => {
+      if (dryRun === true) return [200, { dryRun: true, plan: updatePostPlan(client) }];
+      if (confirm !== 'UPDATE') return [400, { error: 'Send {"confirm":"UPDATE"} to start (or {"dryRun":true}).' }];
+      return startUpdatePost(client) ? [202, { started: true }] : [409, { error: 'Already running', status: updatePostStatus() }];
+    },
+    'POST /update-post/preview': async ({ guildId, userId }) => {
+      if (typeof guildId !== 'string' || typeof userId !== 'string') return [400, { error: 'guildId and userId required' }];
+      return [200, { dm: await sendUpdatePreview(client, guildId, userId) }];
     },
     'POST /welcome-all': async () => {
       // sendSetupCard swallows its own DM failures

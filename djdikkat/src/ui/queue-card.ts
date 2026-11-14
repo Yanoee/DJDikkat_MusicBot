@@ -40,6 +40,9 @@ export function buildQueueMessage(guildId: string, state: GuildState, page: numb
       new ButtonBuilder().setCustomId(`music:clearqueue:${guildId}`).setLabel(t(locale, 'card.btn.clear')).setEmoji(cardIcon('clear', '🧹')).setStyle(ButtonStyle.Secondary)
     );
   }
+  if (state.current) {
+    tools.addComponents(new ButtonBuilder().setCustomId(`music:pladd:${guildId}`).setLabel(t(locale, 'card.btn.pladd')).setEmoji(cardIcon('pladd', '➕')).setStyle(ButtonStyle.Secondary));
+  }
   tools.addComponents(panelButton(guildId, locale));
   return { content: '', embeds: [embed], components: [pagerRow('queuepage', guildId, safePage, totalPages, userId, locale), tools] };
 }

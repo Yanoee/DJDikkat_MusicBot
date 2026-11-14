@@ -10,9 +10,13 @@ import { pause, skip, stop, disconnect, queue } from './controls.ts';
 import { history, health, stats } from './info.ts';
 import { language } from './language.ts';
 import { panel } from './panel.ts';
+import { playlist } from './playlist.ts';
+import { autoplay, filter } from './effects.ts';
+import { transitions } from './transitions.ts';
+import { radio } from './radio.ts';
 import type { Command } from './shared.ts';
 
-const commands: Command[] = [play, pause, skip, queue, health, stats, history, disconnect, stop, language, panel];
+const commands: Command[] = [play, playlist, pause, skip, queue, filter, autoplay, transitions, radio, health, stats, history, disconnect, stop, language, panel];
 
 export const commandsByName = new Map(commands.map(c => [c.data.name, c]));
 

@@ -15,6 +15,7 @@ import { config, missingSettings } from './config.ts';
 import { setButtonCooldownMs } from './components/buttons.ts';
 import { getActiveGuildIds, setCommandCooldownMs } from './music/state.ts';
 import { handlePlayerFailure } from './music/player.ts';
+import { RESUME_TIMEOUT_S, installSessionResume, onNodeReady, saveForRestart } from './music/resume.ts';
 import { handleInteraction } from './events/interaction-create.ts';
 import { onReady } from './events/ready.ts';
 import { onGuildCreate, onGuildDelete, onGuildUpdate, onVoiceStateUpdate } from './events/guild.ts';
@@ -65,12 +66,17 @@ const shoukaku = new Shoukaku(
   [{ name: 'main', url: `${config.nodelink.host}:${config.nodelink.port}`, auth: config.nodelink.password, secure: config.nodelink.secure }],
   // Shoukaku's defaults (3 tries × 5s) can run out before NodeLink finishes a
   // cold boot if both restart together; the node then never retries.
-  { reconnectTries: 10, reconnectInterval: 5 }
+  // resume: NodeLink keeps our players playing for a while when we drop, so a
+  // restart doesn't stop the music (music/resume.ts carries the session over).
+  { reconnectTries: 10, reconnectInterval: 5, resume: true, resumeTimeout: RESUME_TIMEOUT_S }
 );
 client.shoukaku = shoukaku;
 
 shoukaku.on('error', (nodeName, error) => console.error(`[NODELINK ERROR] Node ${nodeName}`, error));
-shoukaku.on('ready', nodeName => console.log(`✅ NodeLink node ready: ${nodeName}`));
+shoukaku.on('ready', (nodeName, resumed) => {
+  console.log(`✅ NodeLink node ready: ${nodeName}${resumed ? ' (session resumed, players kept)' : ''}`);
+  onNodeReady(resumed);
+});
 
 // 'close' fires on every dropped NodeLink socket; Shoukaku then retries on its
 // own and emits 'ready' again. Every player session on the node is dead too —
@@ -159,7 +165,13 @@ let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`🛑 ${signal} received — flushing pending DB writes`);
+  console.log(`🛑 ${signal} received — saving playback and flushing pending DB writes`);
+  // Voice and NodeLink players stay up on purpose: the next start takes them back.
+  const saved = await Promise.race([saveForRestart(client), new Promise<null>(r => setTimeout(r, 4000, null))]).catch(err => {
+    console.error('[RESUME] playback not saved:', errMsg(err));
+    return null;
+  });
+  if (saved !== null) console.log(`💾 Saved playback for ${saved} server(s)`);
   await Promise.race([memory.flush(), new Promise(r => setTimeout(r, 5000))]).catch(() => {});
   await db.close();
   process.exit(0);
@@ -173,6 +185,7 @@ try {
   console.error('❌ Could not load data from MariaDB — exiting so systemd retries:', errMsg(err));
   process.exit(1);
 }
+installSessionResume(); // before login: NodeLink connects on ready
 await client.login(config.discordToken).catch(err => {
   console.error('❌ Discord login failed:', errMsg(err));
   process.exit(1);

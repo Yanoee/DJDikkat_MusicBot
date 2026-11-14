@@ -15,6 +15,9 @@ import { deleteMessage, loadCardIcons } from '../ui/player-card.ts';
 import { sendAnnouncement } from '../services/announcement.ts';
 import { startInternalServer, startPresence } from '../internal/server.ts';
 import * as memory from '../services/memory.ts';
+import { restoreAfterRestart } from '../music/resume.ts';
+import { migrateRadioRule, migrateTransitionsRule } from '../services/access.ts';
+import { getConfig, setConfig } from '../services/config-store.ts';
 import { startHeartbeat } from '../lib/logger.ts';
 import { errMsg } from '../lib/errors.ts';
 
@@ -29,15 +32,28 @@ export async function onReady(client: Client<true>): Promise<void> {
     console.log('ℹ️  Command deploy skipped');
   }
   startPresence(client);
+  if (!getConfig('transitionsRuleMigrated')) {
+    const copied = migrateTransitionsRule(client.guilds.cache.keys());
+    setConfig('transitionsRuleMigrated', true);
+    console.log(`🎚️  Transitions rule copied from autoplay for ${copied} server(s)`);
+  }
+  if (!getConfig('radioRuleMigrated')) {
+    const copied = migrateRadioRule(client.guilds.cache.keys());
+    setConfig('radioRuleMigrated', true);
+    console.log(`📻 Radio rule copied from autoplay for ${copied} server(s)`);
+  }
 
   // Internal API + heartbeat first — the startup announcements below walk
   // every guild one by one and can take a while.
   startInternalServer(client, config.internal.port);
   startHeartbeat(client, getActiveVoiceCount);
 
-  await memory.syncAllGuildInfo(client).catch(err => console.error('[DB] Guild directory sync failed:', errMsg(err)));
   await loadCardIcons(client);
   await cleanupStaleCards(client);
+  // After the card cleanup (servers that come back get a fresh card) and
+  // before the slow directory sync: NodeLink keeps our players only 60 s.
+  await restoreAfterRestart(client).catch(err => console.error('[RESUME] restore failed:', errMsg(err)));
+  await memory.syncAllGuildInfo(client).catch(err => console.error('[DB] Guild directory sync failed:', errMsg(err)));
   cleanupStaleStats(client);
   await announceAll(client);
   setInterval(() => announceAll(client), 60 * 60 * 1000);

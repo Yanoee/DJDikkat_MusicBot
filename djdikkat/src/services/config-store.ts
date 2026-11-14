@@ -10,6 +10,7 @@ import * as db from './db.ts';
 import { config } from '../config.ts';
 import { t } from '../i18n/index.ts';
 import type { Locale } from '../i18n/index.ts';
+import type { SavedPlayback } from '../music/player.ts';
 
 export interface Maintenance {
   enabled: boolean;
@@ -30,6 +31,21 @@ export interface ConfigMap {
   presence: PresenceConfig;
   savedPresence: PresenceConfig; // presence to restore when maintenance ends
   launchDmed: string[];          // admins who already got the v6 launch DM
+  djDmed: string[];              // admins who already got the DJ role DM
+  updatePosted: string[];        // servers that got the v6 "what's new" post (kept for the record)
+  update7Posted: string[];       // servers that already got the v7 "what's new" post
+  rotation: { lines: string[]; seconds: number }; // the rotating status lines (admin → Controls → Presence)
+  playback: PlaybackSnapshot;    // what was playing at the last shutdown / save (music/resume.ts)
+  transitionsRuleMigrated: boolean; // access.ts migrateTransitionsRule ran (once)
+  radioRuleMigrated: boolean;       // access.ts migrateRadioRule ran (once)
+}
+
+/** Playback saved for the next start, plus the NodeLink session it can resume. */
+export interface PlaybackSnapshot {
+  savedAt: number;
+  reason: 'shutdown' | 'periodic';
+  nodeSessionId: string | null;
+  guilds: SavedPlayback[];
 }
 type Key = keyof ConfigMap;
 
@@ -59,6 +75,15 @@ export function setConfig<K extends Key>(name: K, value: ConfigMap[K] | null): v
     'INSERT INTO bot_config (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
     [name, JSON.stringify(value)]
   ), `save config ${name}`);
+}
+
+/** setConfig, but waits for the DB (shutdown can't fire and forget). */
+export async function saveConfigNow<K extends Key>(name: K, value: ConfigMap[K]): Promise<void> {
+  cache.set(name, value);
+  await db.query(
+    'INSERT INTO bot_config (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+    [name, JSON.stringify(value)]
+  );
 }
 
 // ── Maintenance switch (admin panel) ──────────────────────

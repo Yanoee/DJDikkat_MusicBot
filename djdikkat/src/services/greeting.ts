@@ -9,7 +9,7 @@
  * Developer Portal allows it).
  * Author: Yanoee
  ************************************************************/
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import type { Guild, GuildMember, MessageCreateOptions } from 'discord.js';
 import { getGuildMemory, setGuildSettings } from './memory.ts';
 import { TEXT_TYPES } from './access.ts';
@@ -100,6 +100,21 @@ export function saveWelcome(guildId: string, welcome: WelcomeConfig): void {
   setGuildSettings(guildId, { welcome });
 }
 
+/**
+ * A server that just added the bot and never saved a Welcome setting gets the
+ * image card in Discord's system channel, when the bot may post pictures there.
+ * Servers that set it up before (and rejoin) keep theirs.
+ */
+export function enableDefaultWelcome(guild: Guild): boolean {
+  if (getGuildMemory(guild.id).settings.welcome) return false;
+  const channel = guild.systemChannel;
+  const me = guild.members.me;
+  const needs = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles];
+  if (!channel || !me || !channel.permissionsFor(me).has(needs)) return false;
+  saveWelcome(guild.id, { ...defaultWelcome(), enabled: true });
+  return true;
+}
+
 /** Where the channel post goes: the picked channel, else Discord's system channel. */
 export function welcomeChannelId(w: WelcomeConfig, guild: Guild): string | null {
   return w.channelId ?? guild.systemChannelId;
@@ -155,7 +170,8 @@ export async function buildGreeting(w: WelcomeConfig, member: GuildMember): Prom
     if (w.embed.thumbnail && !withImage) embed.setThumbnail(member.displayAvatarURL({ size: 256 }));
     if (w.embed.image && !withImage) embed.setImage(w.embed.image);
     if (w.embed.footer.trim()) embed.setFooter({ text: fill(w.embed.footer, member).slice(0, LIMITS.footer) });
-    out.embeds = [embed];
+    // Discord refuses an embed with nothing to show (e.g. only an image, dropped beside the card).
+    if (embed.data.title || embed.data.description || embed.data.image) out.embeds = [embed];
   }
   if (w.button) {
     const locale = guildLocale(member.guild.id, member.guild);

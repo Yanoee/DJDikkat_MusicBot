@@ -7,7 +7,8 @@
  ************************************************************/
 import { InteractionContextType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import type {
-  AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, RepliableInteraction, SlashCommandOptionsOnlyBuilder
+  AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, RepliableInteraction, SlashCommandOptionsOnlyBuilder, SlashCommandSubcommandsOnlyBuilder,
+  StringSelectMenuInteraction
 } from 'discord.js';
 import { getState } from '../music/state.ts';
 import type { GuildState } from '../music/state.ts';
@@ -20,7 +21,7 @@ export const PAGE_SIZE = 10;
 export const STATS_AUTO_DELETE_MS = 3 * 60 * 1000;
 
 export interface Command {
-  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
+  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder | SlashCommandSubcommandsOnlyBuilder;
   execute(interaction: ChatInputCommandInteraction<'cached'>): Promise<unknown>;
   autocomplete?(interaction: AutocompleteInteraction): Promise<unknown>;
 }
@@ -61,7 +62,7 @@ export function canManageGuild(interaction: RepliableInteraction): boolean {
 
 /** Voice gate for playback controls; replies and returns false when the user can't control. */
 export async function canControlPlayback(
-  interaction: ChatInputCommandInteraction<'cached'> | ButtonInteraction<'cached'>, state: GuildState
+  interaction: ChatInputCommandInteraction<'cached'> | ButtonInteraction<'cached'> | StringSelectMenuInteraction<'cached'>, state: GuildState
 ): Promise<boolean> {
   const memberChannelId = interaction.member.voice.channelId;
   if (!state.voiceChannelId) {

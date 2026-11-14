@@ -10,10 +10,11 @@
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import type { Guild, GuildMember } from 'discord.js';
 import { getGuildMemory, setGuildSettings } from './memory.ts';
+import { peekState } from '../music/state.ts';
 import type { MessageKey, Vars } from '../i18n/index.ts';
 
 /** Everything a rule can be set for. /language, /panel and /health stay Manage Server / Admin only. */
-export const PERM_KEYS = ['play', 'pause', 'skip', 'stop', 'disconnect', 'loop', 'shuffle', 'clear', 'queue', 'history', 'stats'] as const;
+export const PERM_KEYS = ['play', 'playlist', 'pause', 'skip', 'stop', 'disconnect', 'loop', 'shuffle', 'filter', 'autoplay', 'transitions', 'radio', 'clear', 'queue', 'history', 'stats'] as const;
 export type PermKey = typeof PERM_KEYS[number];
 
 export interface CommandRule {
@@ -58,8 +59,53 @@ export function emptyPermissions(): GuildPermissions {
   return { djRoles: [], textChannels: [], voiceChannels: [], commands: {}, panel: [] };
 }
 
+/** Normal mode: everyone plays, pauses and skips their own song; the rest needs a DJ role. Same as the panel's "Normal" preset. */
+export const NORMAL_DJ_KEYS = ['skip', 'stop', 'disconnect', 'loop', 'shuffle', 'filter', 'autoplay', 'transitions', 'radio', 'clear'] as const satisfies readonly PermKey[];
+
+export function normalPermissions(djRoleId: string | null): GuildPermissions {
+  const commands = Object.fromEntries(NORMAL_DJ_KEYS.map(k => [k, { enabled: true, who: 'dj', roles: [], channels: [] } satisfies CommandRule]));
+  return { ...emptyPermissions(), djRoles: djRoleId ? [djRoleId] : [], commands };
+}
+
+/** Alone with the bot in its voice channel: nobody else to disturb, so DJ rules don't apply. */
+function aloneWithBot(member: GuildMember): boolean {
+  const channel = member.guild.members.me?.voice.channel;
+  return !!channel && member.voice.channelId === channel.id && channel.members.filter(m => !m.user.bot).size === 1;
+}
+
+/** Skipping a song you added yourself never needs a DJ role. */
+const ownSong = (member: GuildMember) => peekState(member.guild.id)?.current?.requesterId === member.id;
+
 export function getPermissions(guildId: string): GuildPermissions {
   return { ...emptyPermissions(), ...getGuildMemory(guildId).settings.permissions };
+}
+
+/**
+ * Once, when /transitions arrived: servers that had saved rules before it got
+ * the transitions rule of their autoplay (same kind of control), so a server
+ * that kept autoplay to DJs doesn't suddenly let everyone change transitions.
+ * Returns how many servers got a copy.
+ */
+export function migrateTransitionsRule(guildIds: Iterable<string>): number {
+  return copyAutoplayRule(guildIds, 'transitions');
+}
+
+/** Once, when /radio arrived: the same copy for the radio host rule (its own config flag, see events/ready.ts). */
+export function migrateRadioRule(guildIds: Iterable<string>): number {
+  return copyAutoplayRule(guildIds, 'radio');
+}
+
+/** Gives `key` the server's saved autoplay rule where it has one and `key` has none yet. */
+function copyAutoplayRule(guildIds: Iterable<string>, key: PermKey): number {
+  let copied = 0;
+  for (const guildId of guildIds) {
+    const saved = getGuildMemory(guildId).settings.permissions;
+    const autoplay = saved?.commands?.autoplay;
+    if (!saved || !autoplay || saved.commands[key]) continue;
+    setGuildSettings(guildId, { permissions: { ...saved, commands: { ...saved.commands, [key]: { ...autoplay } } } });
+    copied++;
+  }
+  return copied;
 }
 
 export function isManager(member: GuildMember): boolean {
@@ -101,8 +147,26 @@ export function denial(member: GuildMember, key: PermKey, channelId: string | nu
 
   const roles = rule.who === 'dj' ? perms.djRoles : rule.who === 'roles' ? rule.roles : null;
   if (rule.who === 'roles' && !roles?.length) return { key: 'perm.admins' };
+  if (rule.who === 'dj' && (aloneWithBot(member) || (key === 'skip' && ownSong(member)))) return null;
   if (roles?.length && !roles.some(id => member.roles.cache.has(id))) return { key: 'perm.role', vars: { roles: roleList(roles) } };
   return null;
+}
+
+/**
+ * Normal mode for a server that never saved its own rules: a "DJ" role (an existing one
+ * with that name, else a new one when the bot may manage roles) and the Normal preset.
+ * Without a role the DJ rules let everyone through until an admin picks one.
+ */
+export async function enableDjMode(guild: Guild): Promise<{ applied: boolean; roleId: string | null; created: boolean }> {
+  if (getGuildMemory(guild.id).settings.permissions) return { applied: false, roleId: null, created: false };
+  let role = guild.roles.cache.find(r => !r.managed && r.id !== guild.id && r.name.toLowerCase() === 'dj') ?? null;
+  let created = false;
+  if (!role && guild.members.me?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    role = await guild.roles.create({ name: 'DJ', color: 0x3b82c4, permissions: [], reason: 'DJ DIKKAT: DJ role for music controls' }).catch(() => null);
+    created = !!role;
+  }
+  savePermissions(guild.id, normalPermissions(role?.id ?? null));
+  return { applied: true, roleId: role?.id ?? null, created };
 }
 
 /** Why the bot may not be called into this voice channel by this member, or null. */

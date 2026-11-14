@@ -11,13 +11,16 @@
  ************************************************************/
 import { GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
 import type { Client, Guild, GuildBasedChannel, GuildMember } from 'discord.js';
+import { LoadType } from 'shoukaku';
 import type { Track } from 'shoukaku';
-import { getState, peekState, getActiveVoiceCount } from '../music/state.ts';
+import { getState, peekState, getActiveVoiceCount, enqueueRequested } from '../music/state.ts';
 import type { GuildState } from '../music/state.ts';
 import {
-  pickNode, ensurePlayer, playNext, togglePause, toggleLoopMode, stopTrack, stopPlayback, clearQueue
+  pickNode, ensurePlayer, playNext, togglePause, toggleLoopMode, stopTrack, stopPlayback, clearQueue, resolveLinks, filterCooldown, setAutoplay, setFilter
 } from '../music/player.ts';
-import { search, tracksOf } from '../music/search.ts';
+import { filterSpeed, isFilter } from '../music/filters.ts';
+import { fold, normalizeLink, playlistLink, search, suggest, tracksOf } from '../music/search.ts';
+import type { SuggestSource } from '../music/search.ts';
 import { getGuildMemory, setGuildSettings } from '../services/memory.ts';
 import { totalPlays } from '../services/stats.ts';
 import { setGuildLocale } from '../services/locale.ts';
@@ -27,7 +30,11 @@ import { PANEL_RANK, TEXT_TYPES, VOICE_TYPES, getPermissions, panelLevel, saniti
 import type { PanelGrant, PanelLevel } from '../services/access.ts';
 import { giveRole, sendAccessRemoved, sendPanelInvite, takeRole } from '../services/panel-invite.ts';
 import { getWelcome, renderCard, sanitizeWelcome, saveWelcome, sendGreeting, welcomeProblem } from '../services/greeting.ts';
-import { featureNeeds, getFeatures, saveFeatures } from '../services/features.ts';
+import { CROSSFADE_MAX_S, featureNeeds, getFeatures, getRadio, getTransitions, isJingleUrl, saveFeatures } from '../services/features.ts';
+import type { Radio, Transitions } from '../services/features.ts';
+import { setTransitions, syncNextTrack } from '../music/transitions.ts';
+import { setRadio, testRadio } from '../music/radio.ts';
+import { noteRejected } from '../music/autoplay.ts';
 import { t } from '../i18n/index.ts';
 import { buildSetupCard } from '../ui/setup-card.ts';
 import { upsertController } from '../ui/player-card.ts';
@@ -42,7 +49,7 @@ type Reply = [status: number, data: unknown];
 
 const MAX_QUEUE = 25;
 const MEMBER_LIST = 1000;   // members shown in the Panel access picker; bigger servers search by name
-const RESOLVE_CONCURRENCY = 5;
+const IMPORT_MAX = 200;      // a playlist's size limit on the website
 const str = (v: unknown, max = 300) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 const int = (v: unknown) => typeof v === 'number' && Number.isInteger(v) ? v : -1;
 /** #rrggbb (lower case), null to reset, undefined if it's neither. */
@@ -67,7 +74,9 @@ const trackView = (track: QueueTrack) => ({
   uri: track.info.uri ?? null,
   artwork: track.info.artworkUrl ?? null,
   lengthMs: track.info.isStream ? 0 : track.info.length,
-  requester: track.requesterTag
+  requester: track.requesterTag,
+  autoplay: !!track.autoplay,
+  autoplayFrom: track.autoplay ? track.autoplayFrom ?? null : null // "Autoplay · like {title}"
 });
 
 /** Maintenance blocks every web action, like it blocks commands (owners and the test server pass).
@@ -118,6 +127,9 @@ function metaView(client: Client, guild: Guild, viewerId: string) {
   };
 }
 
+/** DJ transitions as the panel shows them (same shape as /transitions sets). */
+const transitionsView = (tr: Transitions) => ({ enabled: tr.enabled, crossfadeS: tr.crossfadeS, leveling: tr.leveling });
+
 function stateView(guild: Guild, viewerId = '') {
   const state = peekState(guild.id);
   const channel = state?.voiceChannelId ? guild.channels.cache.get(state.voiceChannelId) : undefined;
@@ -133,22 +145,14 @@ function stateView(guild: Guild, viewerId = '') {
     current: state?.current ? { ...trackView(state.current), positionMs: state.player?.position ?? 0 } : null,
     paused: state?.paused ?? false,
     loop: state ? loopMode(state) : 'off',
+    filter: state?.filter ?? null,
+    speed: filterSpeed(state?.filter ?? null),   // songs run faster / slower with some effects
+    autoplay: getFeatures(guild.id).autoplay.enabled,
+    transitions: transitionsView(getTransitions(guild.id)),
+    radio: getRadio(guild.id),   // the radio host, same shape /radio sets
     queue: (state?.queue ?? []).map(trackView),
     lastPlayed: state?.lastPlayed ?? null
   };
-}
-
-/** Resolves links to tracks (playlist play / requeue), a few at a time. */
-async function resolveAll(client: Client, uris: string[]): Promise<Track[]> {
-  const node = pickNode(client);
-  if (!node) throw new UserError('common.music_server_down');
-  const out: Track[] = [];
-  for (let i = 0; i < uris.length; i += RESOLVE_CONCURRENCY) {
-    const batch = await Promise.all(uris.slice(i, i + RESOLVE_CONCURRENCY)
-      .map(uri => node.rest.resolve(uri).then(tracksOf, () => [])));
-    for (const tracks of batch) if (tracks[0]) out.push(tracks[0]);
-  }
-  return out;
 }
 
 export function buildPanelRoutes(client: Client<true>) {
@@ -171,9 +175,11 @@ export function buildPanelRoutes(client: Client<true>) {
   async function enqueue(guild: Guild, member: GuildMember, state: GuildState, tracks: Track[]): Promise<number> {
     const room = MAX_QUEUE - state.queue.length;
     const added = tracks.slice(0, Math.max(0, room));
-    state.queue.push(...added.map((t): QueueTrack => ({ ...t, requesterId: member.id, requesterTag: member.user.tag })));
-    if (state.current) await upsertController(guild.id, state);
-    else if (added.length) await playNext(guild.id);
+    enqueueRequested(state, added.map((t): QueueTrack => ({ ...t, requesterId: member.id, requesterTag: member.user.tag })));
+    if (state.current) {
+      void syncNextTrack(guild.id); // it goes in ahead of queued autoplay songs: the preloaded next song may have changed
+      await upsertController(guild.id, state);
+    } else if (added.length) await playNext(guild.id);
     return added.length;
   }
 
@@ -213,19 +219,97 @@ export function buildPanelRoutes(client: Client<true>) {
         await state.player.seekTo(ms);
         return done();
       }
+      case 'filter': {
+        if (!state.player || !state.current) return [409, { error: 'nothing_playing' }];
+        const name = body.filter === null || body.filter === 'off' ? null : isFilter(body.filter) ? body.filter : undefined;
+        if (name === undefined) return [400, { error: 'invalid' }];
+        const wait = filterCooldown(guild.id);
+        if (wait) return [429, { error: 'rate_limited', retryAfter: wait }];
+        await setFilter(guild.id, name);
+        return done();
+      }
+      case 'autoplay':
+        if (typeof body.on !== 'boolean') return [400, { error: 'invalid' }];
+        await setAutoplay(guild.id, body.on);
+        return done();
+      case 'transitions': { // any of {enabled, crossfadeS, leveling}; works while idle too
+        const next: Partial<Transitions> = {};
+        if (body.enabled !== undefined) {
+          if (typeof body.enabled !== 'boolean') return [400, { error: 'invalid' }];
+          next.enabled = body.enabled;
+        }
+        if (body.crossfadeS !== undefined) {
+          const s = int(body.crossfadeS);
+          if (s < 0 || s > CROSSFADE_MAX_S) return [400, { error: 'invalid' }];
+          next.crossfadeS = s;
+        }
+        if (body.leveling !== undefined) {
+          if (typeof body.leveling !== 'boolean') return [400, { error: 'invalid' }];
+          next.leveling = body.leveling;
+        }
+        if (!Object.keys(next).length) return [400, { error: 'invalid' }];
+        // Locked while transitions are off, like the panel and /transitions (unless this turns them on).
+        if ((next.crossfadeS !== undefined || next.leveling !== undefined) && !(next.enabled ?? getTransitions(guild.id).enabled)) {
+          return [409, { error: 'transitions_off' }];
+        }
+        await setTransitions(guild.id, next);
+        return done();
+      }
+      case 'radio': { // any subset of the Radio fields; works while idle too
+        const next: Partial<Radio> = {};
+        for (const key of ['enabled', 'trivia', 'names', 'jingles'] as const) {
+          const v = body[key];
+          if (v === undefined) continue;
+          if (typeof v !== 'boolean') return [400, { error: 'invalid' }];
+          next[key] = v;
+        }
+        if (body.every !== undefined) {
+          const n = int(body.every);
+          if (n !== 0 && n !== 1 && n !== 3 && n !== 5) return [400, { error: 'invalid' }];
+          next.every = n;
+        }
+        if (body.volume !== undefined) {
+          const v = body.volume;
+          if (v !== 'quiet' && v !== 'normal' && v !== 'loud') return [400, { error: 'invalid' }];
+          next.volume = v;
+        }
+        if (body.jingleUrl !== undefined) {
+          const url = body.jingleUrl;
+          // null = back to the stock jingles; a link must pass the same host / length check as /radio jingle.
+          if (url !== null && !isJingleUrl(url)) return [400, { error: 'invalid' }];
+          next.jingleUrl = url;
+        }
+        if (!Object.keys(next).length) return [400, { error: 'invalid' }];
+        // Locked while the radio is off, like the panel and /radio (unless this turns it on).
+        if (Object.keys(next).some(k => k !== 'enabled') && !(next.enabled ?? getRadio(guild.id).enabled)) {
+          return [409, { error: 'radio_off' }];
+        }
+        await setRadio(guild.id, next);
+        return done();
+      }
+      case 'radio_test': { // say a sample line over the current song now
+        if (!getRadio(guild.id).enabled) return [409, { error: 'radio_off' }];
+        const result = await testRadio(guild.id);
+        if (result === 'not_playing') return [409, { error: 'nothing_playing' }];
+        if (result === 'failed') return [502, { error: 'radio_failed' }];
+        return done();
+      }
       case 'shuffle': {
         const q = state.queue;
         for (let i = q.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [q[i], q[j]] = [q[j]!, q[i]!];
         }
+        void syncNextTrack(guild.id); // the next song may have changed: re-send NodeLink's preload now
         await upsertController(guild.id, state);
         return done();
       }
       case 'remove': {
         const pos = int(body.position);
         if (pos < 0 || pos >= state.queue.length) return [400, { error: 'invalid' }];
-        state.queue.splice(pos, 1);
+        const [removed] = state.queue.splice(pos, 1);
+        if (removed?.autoplay) noteRejected(guild.id, removed); // taking an autoplay pick out = "not like this"
+        void syncNextTrack(guild.id); // the next song may have changed: re-send NodeLink's preload now
         await upsertController(guild.id, state);
         return done();
       }
@@ -235,15 +319,27 @@ export function buildPanelRoutes(client: Client<true>) {
         if (from < 0 || to < 0 || from >= state.queue.length || to >= state.queue.length) return [400, { error: 'invalid' }];
         const [track] = state.queue.splice(from, 1);
         state.queue.splice(to, 0, track!);
+        void syncNextTrack(guild.id); // the next song may have changed: re-send NodeLink's preload now
         await upsertController(guild.id, state);
         return done();
+      }
+      case 'bulk': { // ticked rows from the panel, one card update: removed, or moved to the top in queue order
+        const picked = new Set(Array.isArray(body.positions) ? body.positions.map(int) : []);
+        if ((body.op !== 'remove' && body.op !== 'top') || !picked.size || [...picked].some(p => p < 0 || p >= state.queue.length)) return [400, { error: 'invalid' }];
+        const chosen = state.queue.filter((_, i) => picked.has(i));
+        const rest = state.queue.filter((_, i) => !picked.has(i));
+        if (body.op === 'remove') for (const tr of chosen) if (tr.autoplay) noteRejected(guild.id, tr); // like a single remove
+        state.queue.splice(0, state.queue.length, ...(body.op === 'top' ? [...chosen, ...rest] : rest));
+        void syncNextTrack(guild.id); // the next song may have changed: re-send NodeLink's preload now
+        await upsertController(guild.id, state);
+        return done({ count: picked.size });
       }
       case 'jump': { // play this queued track now: to the front, then skip like the Skip button
         const pos = int(body.position);
         if (pos < 0 || pos >= state.queue.length) return [400, { error: 'invalid' }];
         const [track] = state.queue.splice(pos, 1);
         state.queue.unshift(track!);
-        if (state.current) await stopTrack(guild.id);
+        if (state.current) await stopTrack(guild.id, { jump: true });
         else await playNext(guild.id);
         return done();
       }
@@ -264,7 +360,7 @@ export function buildPanelRoutes(client: Client<true>) {
         if (!items.length) return [400, { error: 'invalid' }];
         if (state.queue.length >= MAX_QUEUE) return [409, { error: 'queue_full' }];
         await playerFor(guild, member, state);
-        const tracks = await resolveAll(client, items.slice(0, MAX_QUEUE - state.queue.length));
+        const tracks = await resolveLinks(client, items.slice(0, MAX_QUEUE - state.queue.length));
         if (!tracks.length) return [404, { error: 'no_results' }];
         return done({ added: await enqueue(guild, member, state, tracks) });
       }
@@ -402,7 +498,7 @@ export function buildPanelRoutes(client: Client<true>) {
       return [200, { guilds }];
     }
 
-    const m = path.match(/^\/panel\/guild\/(\d{17,20})\/(state|action|member|meta|config|avatars|members)$/);
+    const m = path.match(/^\/panel\/guild\/(\d{17,20})\/(state|action|member|meta|config|avatars|members|search|resolve|leave)$/);
     if (!m) return null;
     const guild = client.guilds.cache.get(m[1]!);
     if (!guild) return [404, { error: 'not_in_guild' }];
@@ -436,6 +532,56 @@ export function buildPanelRoutes(client: Client<true>) {
       return [200, { members, more: !q && (found?.size ?? 0) >= MEMBER_LIST }];
     }
 
+    // Search box under the queue: YouTube Music, plus Spotify and/or SoundCloud (src=sp,sc)
+    // side by side. Picking a result queues its link, so exactly that track plays.
+    if (method === 'GET' && m[2] === 'search') {
+      const params = new URLSearchParams(query);
+      const q = (params.get('q') ?? '').trim().slice(0, 100);
+      if (fold(q).length < 3 || normalizeLink(q)) return [200, { groups: [] }];
+      const node = pickNode(client);
+      if (!node) return [503, { error: 'bot_offline' }];
+      const extra = (params.get('src') ?? '').split(',');
+      const sources: SuggestSource[] = ['ytm', ...(['sp', 'sc'] as const).filter(s => extra.includes(s))];
+      const groups = await Promise.all(sources.map(async source => ({
+        source,
+        tracks: (await suggest(id => node.rest.resolve(id), q, source, sources.length > 1 ? 3 : 5))
+          .filter(track => track.info.uri)
+          .map(track => ({
+            title: track.info.title,
+            author: track.info.author,
+            uri: track.info.uri,
+            artwork: track.info.artworkUrl ?? null,
+            lengthMs: track.info.isStream ? 0 : track.info.length
+          }))
+      })));
+      return [200, { groups }];
+    }
+
+    // Playlist import (website): a YouTube / YouTube Music / Spotify / SoundCloud playlist or album link → its
+    // songs, not queued (the website previews them, or saves them to a playlist). NodeLink reads every source
+    // itself. 422 with a code when the link doesn't load.
+    if (method === 'GET' && m[2] === 'resolve') {
+      const link = await playlistLink(new URLSearchParams(query).get('url') ?? '');
+      if ('error' in link) return [422, { error: link.error }];
+      const node = pickNode(client);
+      if (!node) return [503, { error: 'bot_offline' }];
+      const res = await node.rest.resolve(link.url).catch(() => undefined);
+      const list = res?.loadType === LoadType.PLAYLIST;
+      const tracks = (list ? res.data.tracks : tracksOf(res)).filter(tr => tr.info.uri);
+      if (!tracks.length) return [422, { error: res?.loadType === LoadType.ERROR ? 'import_failed' : 'import_empty' }];
+      return [200, {
+        name: list ? res.data.info.name : null,
+        source: tracks[0]!.info.sourceName,
+        playlist: list,
+        mix: link.mix,
+        total: tracks.length,
+        tracks: tracks.slice(0, IMPORT_MAX).map(tr => ({
+          title: tr.info.title, author: tr.info.author, uri: tr.info.uri, artwork: tr.info.artworkUrl ?? null,
+          lengthMs: tr.info.isStream ? 0 : tr.info.length
+        }))
+      }];
+    }
+
     if (method === 'POST' && m[2] === 'config') {
       const who = await actor(guild, body, 'full');
       if (!who) return [403, { error: 'forbidden' }];
@@ -445,6 +591,25 @@ export function buildPanelRoutes(client: Client<true>) {
         const appErr = logError(err, { guildId: guild.id, during: `panel config ${str(body.op, 20)}` });
         return [500, { error: 'server', ref: appErr.ref }];
       }
+    }
+
+    // "Leave panel access": the person's own entry goes, with the role the panel gave them. Access
+    // through a role on the list stays: dropping that role entry would cut off everyone who has it.
+    if (method === 'POST' && m[2] === 'leave') {
+      const who = await actor(guild, body, 'dj');
+      if (!who) return [403, { error: 'forbidden' }];
+      if (who.level === 'admin') return [409, { error: 'leave_admin' }];
+      const perms = getPermissions(guild.id);
+      const mine = perms.panel.find(g => g.type === 'user' && g.id === who.member.id);
+      if (mine) {
+        perms.panel = perms.panel.filter(g => g !== mine);
+        savePermissions(guild.id, perms);
+        if (mine.role) await takeRole(guild, mine.id, mine.role);
+      }
+      const viaRoles = perms.panel.filter(g => g.type === 'role' && g.id !== mine?.role && who.member.roles.cache.has(g.id));
+      if (viaRoles.length) return [409, { error: 'leave_role', roles: viaRoles.map(g => guild.roles.cache.get(g.id)?.name ?? g.id) }];
+      console.log(`[PANEL] guild=${guild.id} user=${who.member.id} left panel access`);
+      return [200, { ok: true }];
     }
 
     if (method === 'POST' && m[2] === 'member') {

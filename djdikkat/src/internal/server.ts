@@ -11,6 +11,8 @@ import { ActivityType, PermissionFlagsBits } from 'discord.js';
 import type { Client, PresenceData, PresenceStatusData } from 'discord.js';
 import { sendCustomToAll, sendAnnouncement, sendSetupCard } from '../services/announcement.ts';
 import { launchPlan, launchStatus, sendLaunchPreview, startLaunch, stopLaunch } from '../services/launch.ts';
+import { djModePlan, djModeStatus, sendDjPreview, startDjMode } from '../services/dj-mode.ts';
+import { sendUpdatePreview, startUpdatePost, updatePostPlan, updatePostStatus } from '../services/update-post.ts';
 import { cleanDms, scanAndCleanDms } from '../services/dm-store.ts';
 import { getGuildMemory, getGuildMessagesRaw, resetGuildMemory, resetGuildHistory, resetGuildMessages, setGuildSettings } from '../services/memory.ts';
 import { getGuildStatsRaw } from '../services/stats.ts';
@@ -264,6 +266,28 @@ function buildRoutes(client: Client<true>) {
         guildId, activate: activate !== false, postToUser: postToUser === true,
         channelId: typeof channelId === 'string' ? channelId : undefined, userId: typeof userId === 'string' ? userId : undefined
       })];
+    },
+    // DJ mode for servers without their own rules: GET = the plan, POST dryRun / confirm "DJ", preview = the admin DM to one user.
+    'GET /dj-mode': async () => [200, { status: djModeStatus(), plan: djModePlan(client) }],
+    'POST /dj-mode': async ({ confirm, dryRun }) => {
+      if (dryRun === true) return [200, { dryRun: true, plan: djModePlan(client) }];
+      if (confirm !== 'DJ') return [400, { error: 'Send {"confirm":"DJ"} to start (or {"dryRun":true}).' }];
+      return startDjMode(client) ? [202, { started: true }] : [409, { error: 'Already running', status: djModeStatus() }];
+    },
+    'POST /dj-mode/preview': async ({ guildId, userId }) => {
+      if (typeof guildId !== 'string' || typeof userId !== 'string') return [400, { error: 'guildId and userId required' }];
+      return [200, { dm: await sendDjPreview(client, guildId, userId) }];
+    },
+    // "What's new" post in every server's channel: GET = the plan, POST dryRun / confirm "UPDATE", preview = DM to one user.
+    'GET /update-post': async () => [200, { status: updatePostStatus(), plan: updatePostPlan(client) }],
+    'POST /update-post': async ({ confirm, dryRun }) => {
+      if (dryRun === true) return [200, { dryRun: true, plan: updatePostPlan(client) }];
+      if (confirm !== 'UPDATE') return [400, { error: 'Send {"confirm":"UPDATE"} to start (or {"dryRun":true}).' }];
+      return startUpdatePost(client) ? [202, { started: true }] : [409, { error: 'Already running', status: updatePostStatus() }];
+    },
+    'POST /update-post/preview': async ({ guildId, userId }) => {
+      if (typeof guildId !== 'string' || typeof userId !== 'string') return [400, { error: 'guildId and userId required' }];
+      return [200, { dm: await sendUpdatePreview(client, guildId, userId) }];
     },
     'POST /welcome-all': async () => {
       // sendSetupCard swallows its own DM failures

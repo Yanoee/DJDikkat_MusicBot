@@ -13,6 +13,8 @@ import {
 } from 'discord.js';
 import type { Guild } from 'discord.js';
 import { config } from '../config.ts';
+import { getWelcome, welcomeChannelId } from '../services/greeting.ts';
+import { getPermissions } from '../services/access.ts';
 import { LOCALES, t } from '../i18n/index.ts';
 import type { Locale } from '../i18n/index.ts';
 
@@ -30,7 +32,7 @@ export function buildSetupCard(guild: Guild, locale: Locale, removeFor?: string)
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.panel')).setEmoji('🎛️').setURL(`${site}/dashboard/${guild.id}`),
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.website')).setEmoji('🌐').setURL(site),
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.bug')).setEmoji('🐛').setURL(`${config.links.github}/issues`),
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.invite')).setEmoji('➕').setURL(`${site}/invite`)
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(t(locale, 'setup.btn.invite')).setEmoji('📨').setURL(`${site}/invite`)
   );
   const start = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setStyle(ButtonStyle.Primary).setCustomId('setup:start').setLabel(t(locale, 'setup.btn.start')).setEmoji('🎵')
@@ -49,12 +51,20 @@ export function buildSetupCard(guild: Guild, locale: Locale, removeFor?: string)
     .addTextDisplayComponents(text(`## ${t(locale, 'setup.title', { guild: guild.name })}\n${t(locale, 'setup.intro')}`))
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(guild.client.user.displayAvatarURL({ size: 128 })));
 
+  // Greetings on (by default for new servers): say where, so nobody is surprised.
+  const welcome = getWelcome(guild.id);
+  const welcomeChannel = welcome.enabled && welcome.toChannel ? welcomeChannelId(welcome, guild) : null;
+  // Normal mode with a DJ role: say who controls the music. Plain name, role mentions don't work in DMs.
+  const djRole = guild.roles.cache.get(getPermissions(guild.id).djRoles[0] ?? '');
+
   const card = new ContainerBuilder().setAccentColor(ACCENT)
     .addSectionComponents(head)
     .addSeparatorComponents(line())
     .addTextDisplayComponents(
       text(t(locale, 'setup.steps')),
       text(`### ${t(locale, 'setup.panel.head')}\n${t(locale, 'setup.panel.body', { host, url: `${site}/dashboard/${guild.id}` })}`),
+      ...(djRole ? [text(`### ${t(locale, 'setup.dj.head')}\n${t(locale, 'setup.dj.body', { role: djRole.name, host, url: `${site}/dashboard/${guild.id}/permissions` })}`)] : []),
+      ...(welcomeChannel ? [text(`### ${t(locale, 'setup.welcome.head')}\n${t(locale, 'setup.welcome.body', { channel: `<#${welcomeChannel}>`, host, url: `${site}/dashboard/${guild.id}/welcome` })}`)] : []),
       text(`### ${t(locale, 'setup.free.head')}\n${t(locale, 'setup.free.body', { patreon: config.links.patreon })}`)
     )
     .addSeparatorComponents(line())

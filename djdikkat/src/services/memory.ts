@@ -248,7 +248,7 @@ export async function syncAllGuildInfo(client: Client): Promise<void> {
 
 // ── History ───────────────────────────────────────────────
 
-export function recordHistory(guildId: string, p: { title?: string; url?: string | null; userId?: string | null; userTag?: string | null }): void {
+export function recordHistory(guildId: string, p: { title?: string; url?: string | null; userId?: string | null; userTag?: string | null; artwork?: string | null }): void {
   const entry: HistoryEntry = {
     title:   p.title   || 'Unknown',
     url:     p.url     || null,
@@ -260,9 +260,9 @@ export function recordHistory(guildId: string, p: { title?: string; url?: string
   mem.history.unshift(entry);
   if (mem.history.length > HISTORY_MAX) mem.history.length = HISTORY_MAX;
 
-  db.background(db.query('INSERT INTO plays (guild_id, title, url, user_id, user_tag, played_at) VALUES (?, ?, ?, ?, ?, ?)',
+  db.background(db.query('INSERT INTO plays (guild_id, title, url, user_id, user_tag, artwork, played_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [guildId, entry.title.slice(0, 512), entry.url?.slice(0, 1024) ?? null, entry.userId,
-     entry.userTag?.slice(0, 100) ?? null, new Date(entry.ts)]), `record play for guild ${guildId}`);
+     entry.userTag?.slice(0, 100) ?? null, p.artwork?.slice(0, 1024) ?? null, new Date(entry.ts)]), `record play for guild ${guildId}`);
 }
 
 export function getHistoryPage(guildId: string, page: number, pageSize: number) {

@@ -4,14 +4,14 @@
  * Player-card controls, pagers and DM housekeeping buttons.
  * Author: Yanoee
  ************************************************************/
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { ActionRowBuilder, MessageFlags, PermissionFlagsBits, StringSelectMenuBuilder } from 'discord.js';
 import type { ButtonInteraction } from 'discord.js';
 import { getState, clampCooldownMs } from '../music/state.ts';
 import type { GuildState } from '../music/state.ts';
 import {
-  pickNode, ensurePlayer, playNext, togglePause, toggleLoopMode, stopTrack, stopPlayback, clearQueue, disconnectGuild
+  pickNode, ensurePlayer, playNext, togglePause, toggleLoopMode, stopTrack, stopPlayback, clearQueue, disconnectGuild, autoplayOn, setAutoplay
 } from '../music/player.ts';
-import { tracksOf } from '../music/search.ts';
+import { tracksOf, cleanQuery } from '../music/search.ts';
 import { resetGuildMemory, resetGuildHistory, resetGuildMessages, clearStatsMessage } from '../services/memory.ts';
 import { maintenanceMessage, maintenanceBlocks } from '../services/config-store.ts';
 import { upsertController } from '../ui/player-card.ts';
@@ -22,12 +22,14 @@ import { t } from '../i18n/index.ts';
 import type { MessageKey, Vars } from '../i18n/index.ts';
 import { canControlPlayback, ephemeral, requester, say, userLocale } from '../commands/shared.ts';
 import { denial } from '../services/access.ts';
+import { listPlaylists } from '../services/playlists.ts';
 import type { PermKey } from '../services/access.ts';
+import { syncNextTrack } from '../music/transitions.ts';
 
 /** Player-card button → the rule that governs it. */
 const BUTTON_PERM: Record<string, PermKey> = {
   toggle: 'pause', skip: 'skip', stop: 'stop', disconnect: 'disconnect', clearqueue: 'clear',
-  queue: 'queue', loop: 'loop', shuffle: 'shuffle', replay: 'play'
+  queue: 'queue', loop: 'loop', shuffle: 'shuffle', replay: 'play', pladd: 'playlist', autoplay: 'autoplay'
 };
 
 let BUTTON_COOLDOWN_MS = 5000;
@@ -155,6 +157,12 @@ export async function handleButton(interaction: ButtonInteraction): Promise<unkn
       return followUp(mode === 'track' ? 'loop.track' : mode === 'queue' ? 'loop.queue' : 'loop.off');
     }
 
+    case 'autoplay': {
+      const on = !autoplayOn(guildId);
+      await setAutoplay(guildId, on); // also refreshes the card
+      return followUp(on ? 'autoplay.on' : 'autoplay.off');
+    }
+
     case 'shuffle': {
       const q = state.queue;
       if (!q.length) return followUp('queue.empty');
@@ -162,8 +170,21 @@ export async function handleButton(interaction: ButtonInteraction): Promise<unkn
         const j = Math.floor(Math.random() * (i + 1));
         [q[i], q[j]] = [q[j]!, q[i]!];
       }
+      void syncNextTrack(guildId); // the song after this one changed: crossfade into the new one
       await upsertController(guildId, state);
       return followUp('queue.shuffled');
+    }
+
+    case 'pladd': {
+      if (!state.current) return followUp('common.nothing_playing');
+      const lists = await listPlaylists(guildId);
+      if (!lists.length) return followUp('playlist.none');
+      const menu = new StringSelectMenuBuilder().setCustomId(`pladd:${guildId}`).setPlaceholder(t(locale, 'playlist.pick'))
+        .addOptions(lists.map(p => ({ label: p.name.slice(0, 100), description: t(locale, 'card.tracks', { count: p.tracks }), value: String(p.id) })));
+      return interaction.editReply({
+        content: t(locale, 'playlist.pick_text', { title: state.current.info.title.slice(0, 200) }),
+        components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)]
+      });
     }
 
     case 'replay': {
@@ -177,9 +198,10 @@ export async function handleButton(interaction: ButtonInteraction): Promise<unkn
       }
       const node = pickNode(interaction.client);
       if (!node) return followUp('common.music_server_down');
-      const [track] = tracksOf(await node.rest.resolve(last.uri || `ytsearch:${last.title}`));
+      const [track] = tracksOf(await node.rest.resolve(last.uri || `ytsearch:${cleanQuery(last.title)}`));
       if (!track) return followUp('replay.not_found');
       state.queue.unshift({ ...track, ...requester(interaction) });
+      void syncNextTrack(guildId);
       if (state.current) await upsertController(guildId, state);
       else await playNext(guildId);
       return followUp('replay.done');

@@ -6,6 +6,7 @@
  ************************************************************/
 import type { Client } from 'discord.js';
 import type { Player } from 'shoukaku';
+import type { FilterName } from './filters.ts';
 import type { LastPlayed, QueueTrack } from '../lib/types.ts';
 
 export interface GuildState {
@@ -36,6 +37,18 @@ export interface GuildState {
   idleUiTimer: NodeJS.Timeout | null;
   lastPlayed: LastPlayed | null; // for the idle card's "Play Again"
   webActor: { name: string; at: number } | null; // last web-panel action, shown on the card
+
+  // Sound effect (one preset) for this session; filterPlayer = the player it was sent to
+  filter: FilterName | null;
+  filterPlayer: Player | null;
+  filterAt: number;          // last change, for the cooldown
+  // Autoplay: the songs started this session (never picked again), and Stop pausing it until something is queued again
+  played: QueueTrack[];
+  autoplayHalted: boolean;
+  // Autoplay seeds: songs a person queued, when they started (newest first, max 10).
+  // Autoplay's own picks never go here, so a session can't drift away from what people asked for.
+  requested: { track: QueueTrack; at: number }[];
+  startedAt: number; // when the current song started (ms epoch); a quick skip of an autoplay song = "not like this"
 }
 
 const guildState = new Map<string, GuildState>();
@@ -52,6 +65,16 @@ export function clampCooldownMs(ms: unknown, current: number): number {
 export function getCommandCooldownMs(): number { return COOLDOWN_MS; }
 export function setCommandCooldownMs(ms: unknown): number {
   return COOLDOWN_MS = clampCooldownMs(ms, COOLDOWN_MS);
+}
+
+/**
+ * Adds songs a person chose to the queue, ahead of any autoplay songs waiting
+ * there: autoplay only fills the gap, it never makes someone wait behind it.
+ */
+export function enqueueRequested(state: GuildState, tracks: QueueTrack[]): void {
+  const firstAuto = state.queue.findIndex(q => q.autoplay);
+  if (firstAuto < 0) state.queue.push(...tracks);
+  else state.queue.splice(firstAuto, 0, ...tracks);
 }
 
 /** Get or create guild state */
@@ -78,7 +101,14 @@ export function getState(guildId: string): GuildState {
       buttonCooldowns: new Map(),
       idleUiTimer: null,
       lastPlayed: null,
-      webActor: null
+      webActor: null,
+      filter: null,
+      filterPlayer: null,
+      filterAt: 0,
+      played: [],
+      autoplayHalted: false,
+      requested: [],
+      startedAt: 0
     };
     guildState.set(guildId, state);
   }

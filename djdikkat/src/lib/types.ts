@@ -16,6 +16,8 @@ declare module 'discord.js' {
 export interface QueueTrack extends Track {
   requesterId: string;
   requesterTag: string;
+  autoplay?: boolean;   // picked by autoplay, not by a person
+  autoplayFrom?: string; // autoplay only: title of the song it was picked for ("like X"), ≤100 chars
 }
 
 export interface LastPlayed {

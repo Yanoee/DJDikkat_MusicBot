@@ -9,11 +9,16 @@ import type { Guild, VoiceState } from 'discord.js';
 import { peekState } from '../music/state.ts';
 import { disconnectGuild } from '../music/player.ts';
 import { sendAnnouncement, sendSetupCard } from '../services/announcement.ts';
+import { enableDefaultWelcome } from '../services/greeting.ts';
+import { enableDjMode } from '../services/access.ts';
 import * as memory from '../services/memory.ts';
 import * as db from '../services/db.ts';
 
 export async function onGuildCreate(guild: Guild): Promise<void> {
   db.background(memory.syncGuildInfo(guild, true), `sync joined guild ${guild.id}`);
+  if (enableDefaultWelcome(guild)) console.log(`[WELCOME] guild=${guild.id} greetings on by default in #${guild.systemChannel?.name}`);
+  const dj = await enableDjMode(guild).catch(() => null);
+  if (dj?.applied) console.log(`[DJMODE] guild=${guild.id} normal mode on join, role=${dj.roleId ?? 'none'}${dj.created ? ' (created)' : ''}`);
   await sendSetupCard(guild);
   await sendAnnouncement(guild).catch(err => console.error(`Failed to announce in guild ${guild.id}:`, err));
 }

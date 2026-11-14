@@ -20,7 +20,35 @@ export interface GuildFeatures {
   links: { enabled: boolean; mode: 'invites' | 'all'; allow: string[]; ruleId: string | null };
   words: { enabled: boolean; words: string[]; presets: number[]; ruleId: string | null; presetRuleId: string | null };
   reminder: { enabled: boolean };   // the weekly "free, Patreon if you like" post
+  autoplay: { enabled: boolean };   // similar songs when the queue runs out (player, /autoplay)
+  transitions: Transitions;         // crossfade, soft fades and leveling (player, /transitions)
+  radio: Radio;                     // the radio host voice between songs (music/radio.ts, /radio)
 }
+
+/** DJ transitions: crossfade between songs, short fades on pause/skip/stop/seek, loudness leveling. */
+export interface Transitions { enabled: boolean; crossfadeS: number; leveling: boolean }
+
+export const CROSSFADE_MAX_S = 12;   // crossfadeS is a whole number of seconds, 0..12 (0 = fades + leveling only)
+
+/** Radio host: a short spoken line over the start of a song, trivia, greetings and jingles. Off until a server opts in. */
+export interface Radio {
+  enabled: boolean;
+  every: RadioEvery;              // a host line every N songs; 0 = only the first song of a session
+  trivia: boolean;                // a fact instead of a line about every 10 songs
+  names: boolean;                 // say who requested the song
+  volume: RadioVolume;
+  jingles: boolean;
+  jingleUrl: string | null;       // the server's own jingle (https YouTube / SoundCloud link), null = the stock ones
+}
+export type RadioEvery = 0 | 1 | 3 | 5;
+export type RadioVolume = 'quiet' | 'normal' | 'loud';
+
+export const RADIO_EVERY: readonly RadioEvery[] = [1, 3, 5, 0];
+export const RADIO_VOLUMES: readonly RadioVolume[] = ['quiet', 'normal', 'loud'];
+export const JINGLE_URL_MAX = 300;
+// Only sources NodeLink plays that a server admin can link to; no http:, no other hosts (no IP grabbers, no local files).
+const JINGLE_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be',
+  'soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com'];
 
 const MAX_AUTOROLES = 5;
 const MAX_ALLOW = 50;
@@ -37,7 +65,10 @@ export const defaultFeatures = (): GuildFeatures => ({
   autorole: { enabled: false, roles: [] },
   links: { enabled: false, mode: 'invites', allow: [], ruleId: null },
   words: { enabled: false, words: [], presets: [], ruleId: null, presetRuleId: null },
-  reminder: { enabled: true }
+  reminder: { enabled: true },
+  autoplay: { enabled: false },
+  transitions: { enabled: true, crossfadeS: 4, leveling: true },
+  radio: { enabled: false, every: 3, trivia: true, names: true, volume: 'normal', jingles: true, jingleUrl: null }
 });
 
 export function getFeatures(guildId: string): GuildFeatures {
@@ -49,8 +80,82 @@ export function getFeatures(guildId: string): GuildFeatures {
     autorole: { ...base.autorole, ...saved.autorole },
     links: { ...base.links, ...saved.links },
     words: { ...base.words, ...saved.words },
-    reminder: { ...base.reminder, ...saved.reminder }
+    reminder: { ...base.reminder, ...saved.reminder },
+    autoplay: { ...base.autoplay, ...saved.autoplay },
+    // Servers that saved features before transitions existed get the default (on).
+    transitions: cleanTransitions(saved.transitions, base.transitions),
+    // Saves from before the radio host get the default (off); cleaned so a bad save can't reach the engine.
+    radio: cleanRadio(saved.radio, base.radio)
   };
+}
+
+/** Autoplay on / off for a server (kept like the other features). */
+export function setAutoplayFeature(guildId: string, enabled: boolean): void {
+  setGuildSettings(guildId, { features: { ...getFeatures(guildId), autoplay: { enabled } } });
+}
+
+export function getTransitions(guildId: string): Transitions {
+  return getFeatures(guildId).transitions;
+}
+
+/** Pure: known fields only, booleans as booleans, crossfade a whole number 0..CROSSFADE_MAX_S; anything else keeps `current`. */
+export function cleanTransitions(input: unknown, current: Transitions): Transitions {
+  const raw = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const bool = (v: unknown, keep: boolean) => typeof v === 'boolean' ? v : keep;
+  const secs = typeof raw.crossfadeS === 'number' && Number.isFinite(raw.crossfadeS)
+    ? Math.min(CROSSFADE_MAX_S, Math.max(0, Math.round(raw.crossfadeS)))
+    : current.crossfadeS;
+  return { enabled: bool(raw.enabled, current.enabled), crossfadeS: secs, leveling: bool(raw.leveling, current.leveling) };
+}
+
+/** Saves a server's transitions (kept like the other features) and returns what was saved. */
+export function setTransitionsFeature(guildId: string, next: Partial<Transitions>): Transitions {
+  const features = getFeatures(guildId);
+  const transitions = cleanTransitions(next, features.transitions);
+  setGuildSettings(guildId, { features: { ...features, transitions } });
+  return transitions;
+}
+
+export function getRadio(guildId: string): Radio {
+  return getFeatures(guildId).radio;
+}
+
+/** An https YouTube / SoundCloud link (with a path) of at most JINGLE_URL_MAX characters; same check as jingles.ts isJingleLink. */
+export function isJingleUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value || value.length > JINGLE_URL_MAX || /[\s\p{Cc}]/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port && JINGLE_HOSTS.includes(url.hostname.toLowerCase()) && url.pathname.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pure: known fields only, each checked; anything wrong keeps `current`.
+ * jingleUrl: null or '' goes back to the stock jingles, a valid link is kept (trimmed), any other value is ignored.
+ */
+export function cleanRadio(input: unknown, current: Radio): Radio {
+  const raw = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+  const bool = (v: unknown, keep: boolean) => typeof v === 'boolean' ? v : keep;
+  const link = typeof raw.jingleUrl === 'string' ? raw.jingleUrl.trim() : raw.jingleUrl;
+  return {
+    enabled: bool(raw.enabled, current.enabled),
+    every: RADIO_EVERY.includes(raw.every as RadioEvery) ? raw.every as RadioEvery : current.every,
+    trivia: bool(raw.trivia, current.trivia),
+    names: bool(raw.names, current.names),
+    volume: RADIO_VOLUMES.includes(raw.volume as RadioVolume) ? raw.volume as RadioVolume : current.volume,
+    jingles: bool(raw.jingles, current.jingles),
+    jingleUrl: link === null || link === '' ? null : isJingleUrl(link) ? link : current.jingleUrl
+  };
+}
+
+/** Saves a server's radio host settings (kept like the other features) and returns what was saved. */
+export function setRadioFeature(guildId: string, next: Partial<Radio>): Radio {
+  const features = getFeatures(guildId);
+  const radio = cleanRadio(next, features.radio);
+  setGuildSettings(guildId, { features: { ...features, radio } });
+  return radio;
 }
 
 /** What each feature needs from the bot's own permissions (missing ones are listed in the panel). */
@@ -62,7 +167,10 @@ export function featureNeeds(guild: Guild): Record<keyof GuildFeatures, string[]
     autorole: has(PermissionFlagsBits.ManageRoles) ? [] : ['manage_roles'],
     links: has(PermissionFlagsBits.ManageGuild) ? [] : ['manage_guild'],
     words: has(PermissionFlagsBits.ManageGuild) ? [] : ['manage_guild'],
-    reminder: []
+    reminder: [],
+    autoplay: [],
+    transitions: [],
+    radio: []
   };
 }
 
@@ -91,7 +199,10 @@ export function sanitizeFeatures(guild: Guild, input: unknown, current: GuildFea
       presets: Array.isArray(raw.words?.presets) ? PRESETS.filter(p => (raw.words!.presets as unknown[]).includes(p)) : [],
       ruleId: current.words.ruleId, presetRuleId: current.words.presetRuleId
     },
-    reminder: { enabled: raw.reminder ? on('reminder') : current.reminder.enabled }
+    reminder: { enabled: raw.reminder ? on('reminder') : current.reminder.enabled },
+    autoplay: { enabled: raw.autoplay ? on('autoplay') : current.autoplay.enabled },
+    transitions: raw.transitions ? cleanTransitions(raw.transitions, current.transitions) : current.transitions,
+    radio: raw.radio ? cleanRadio(raw.radio, current.radio) : current.radio
   };
 }
 

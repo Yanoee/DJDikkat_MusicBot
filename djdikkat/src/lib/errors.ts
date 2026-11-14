@@ -9,7 +9,7 @@ import type { MessageKey, Vars } from '../i18n/index.ts';
 
 // Every known error code — call sites reuse this vocabulary instead of
 // inventing tags ad hoc (the compiler rejects anything else).
-export type ErrorCode = 'NODELINK_UNAVAILABLE' | 'RECOVERY_FAILED' | 'TRACK_EXCEPTION' | 'TRACK_STUCK' | 'SPOTIFY_ERROR' | 'UNEXPECTED';
+export type ErrorCode = 'NODELINK_UNAVAILABLE' | 'RECOVERY_FAILED' | 'TRACK_EXCEPTION' | 'TRACK_STUCK' | 'SPOTIFY_ERROR' | 'VOICE_JOIN_FAILED' | 'UNEXPECTED';
 
 /**
  * A deliberate, user-safe message — not a bug, just expected control flow

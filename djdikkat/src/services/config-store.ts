@@ -32,7 +32,9 @@ export interface ConfigMap {
   savedPresence: PresenceConfig; // presence to restore when maintenance ends
   launchDmed: string[];          // admins who already got the v6 launch DM
   djDmed: string[];              // admins who already got the DJ role DM
-  updatePosted: string[];        // servers that already got the "what's new" post
+  updatePosted: string[];        // servers that got the v6 "what's new" post (kept for the record)
+  update7Posted: string[];       // servers that already got the v7 "what's new" post
+  rotation: { lines: string[]; seconds: number }; // the rotating status lines (admin → Controls → Presence)
   playback: PlaybackSnapshot;    // what was playing at the last shutdown / save (music/resume.ts)
   transitionsRuleMigrated: boolean; // access.ts migrateTransitionsRule ran (once)
   radioRuleMigrated: boolean;       // access.ts migrateRadioRule ran (once)

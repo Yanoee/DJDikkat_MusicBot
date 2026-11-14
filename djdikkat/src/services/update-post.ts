@@ -2,8 +2,9 @@
  * DJ DIKKAT - Music Bot
  * Update post
  * One "what's new" post per server (its language, with a
- * language picker): effects, autoplay, playlists, the new
- * player card, the DJ role, and "open your free web panel".
+ * language picker): the v7 update (restart resume, DJ
+ * transitions, smart autoplay, radio host, search, new look)
+ * and "open your free web panel". Tracked in update7Posted.
  * Owner only: POST /update-post with dryRun, or confirm
  * "UPDATE". One post per second; servers already posted are
  * remembered, so a second run never posts twice.
@@ -69,7 +70,7 @@ export async function buildUpdatePost(guild: Guild, locale: Locale) {
 }
 
 const todo = (client: Client<true>) => {
-  const done = new Set(getConfig('updatePosted') ?? []);
+  const done = new Set(getConfig('update7Posted') ?? []);
   return [...client.guilds.cache.values()].filter(g => !done.has(g.id));
 };
 
@@ -97,7 +98,7 @@ export function startUpdatePost(client: Client<true>): boolean {
 
 async function run(client: Client<true>): Promise<void> {
   const guilds = todo(client);
-  const done = new Set(getConfig('updatePosted') ?? []);
+  const done = new Set(getConfig('update7Posted') ?? []);
   status.total = guilds.length;
   for (const guild of guilds) {
     const channel = findAnnouncementChannel(guild, getGuildMemory(guild.id).settings);
@@ -112,7 +113,7 @@ async function run(client: Client<true>): Promise<void> {
       }
     }
     done.add(guild.id);
-    setConfig('updatePosted', [...done]);
+    setConfig('update7Posted', [...done]);
     await sleep(STEP_MS);
   }
 }

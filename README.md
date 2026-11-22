@@ -12,6 +12,7 @@
   <a href="https://www.djdikkat.com/invite"><img src="https://img.shields.io/badge/Add_to_Discord-b5651d?style=for-the-badge&logo=discord&logoColor=white" alt="Add to Discord"></a>
   <a href="https://www.djdikkat.com"><img src="https://img.shields.io/badge/djdikkat.com-3b82c4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
   <a href="https://www.djdikkat.com/dashboard"><img src="https://img.shields.io/badge/Web_panel-1c1a17?style=for-the-badge" alt="Web panel"></a>
+  <a href="https://www.djdikkat.com/discord?from=github"><img src="https://img.shields.io/badge/Support_server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Support server"></a>
 </p>
 
 <p align="center">
@@ -276,6 +277,7 @@ The bot refuses to start and lists what's missing if a required one is empty.
 </p>
 
 - 🌍 **Translate.** The quickest way to help. Start with the [translation guide](TRANSLATING.md).
+- 💬 **Get help or hang out.** [Join the Discord server](https://www.djdikkat.com/discord?from=github): live listening, song requests, ideas and private tickets.
 - 🐛 **Report a bug or share an idea.** [Open an issue](https://github.com/Yanoee/DJDikkat_MusicBot/issues). Say what you did, what you expected and what happened.
 - 🛠️ **Send code.** Keep pull requests small and focused, run `npm run typecheck` and `npm test` first, and keep user-facing text in `src/i18n` so it can be translated.
 
@@ -293,11 +295,11 @@ The bot refuses to start and lists what's missing if a required one is empty.
 DJ DIKKAT is free and stays free. There is no premium tier, and there never will be. Every server bill comes out of one hobby developer's pocket. If the bot saves you from paying for another one, you can help keep it running:
 
 <p>
-  <a href="https://www.djdikkat.com/patreon"><img src="https://img.shields.io/badge/Support_on_Patreon-b5651d?style=for-the-badge&logo=patreon&logoColor=white" alt="Support on Patreon"></a>
+  <a href="https://www.djdikkat.com/donate"><img src="https://img.shields.io/badge/Donate_in_crypto-b5651d?style=for-the-badge&logo=bitcoin&logoColor=white" alt="Donate in crypto"></a>
   <a href="https://www.djdikkat.com/vote"><img src="https://img.shields.io/badge/Vote_on_Top.gg-3b82c4?style=for-the-badge" alt="Vote on Top.gg"></a>
 </p>
 
-- ❤️ **[Patreon](https://www.djdikkat.com/patreon)**: nothing is ever required, and nothing is locked.
+- ❤️ **[Donate](https://www.djdikkat.com/donate)**: nothing is ever required, and nothing is locked.
 - ⬆️ **[Vote on Top.gg](https://www.djdikkat.com/vote)** so more servers find it, or leave a review.
 - ⭐ **Star this repo.** It helps more than you think.
 
